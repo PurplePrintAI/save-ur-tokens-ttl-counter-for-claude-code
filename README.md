@@ -9,6 +9,7 @@ Claude Code를 쓸 때, **캐시가 언제 만료되는지** 그리고 **방금 
 **Table of Contents / 목차**
 
 - [Background / 만든 배경](#background--만든-배경)
+- [Important note on cost / 비용 유의사항](#important-note-on-cost--비용-관련-유의사항)
 - [Why this exists / 왜 만들었나](#why-this-exists)
 - [Before → After](#before--after)
 - [What it does / 기능](#what-it-does--기능)
@@ -39,6 +40,20 @@ I see a lot of people on Threads frustrated about token consumption. But often t
 I hope this small tool helps you save a few more tokens, worry a little less, and enjoy the conversation with your agent a bit more.
 
 이 작은 도구가 토큰을 조금이라도 아끼고, 불안을 조금이라도 줄이고, 에이전트와의 대화를 조금 더 즐기는 데 도움이 되면 좋겠어요.
+
+## Important note on cost / 비용 관련 유의사항
+
+The 5-minute and 1-hour cache modes have [different pricing](https://docs.anthropic.com/en/docs/build-with-claude/prompt-caching#pricing). 1-hour caching costs more per cached token than 5-minute. So yes, there is a price difference — and you should be aware of it.
+
+5분 캐싱과 1시간 캐싱은 [가격이 달라요](https://docs.anthropic.com/en/docs/build-with-claude/prompt-caching#pricing). 1시간 캐싱이 토큰당 비용이 더 높아요. 이 차이는 알고 있어야 해요.
+
+But here's what actually hurts more in practice: **cache resets**. If you're on the default 5-minute TTL and you don't know it, every time you take a few minutes to read or think before your next turn, the cache silently expires. The next prompt rebuilds the entire context from scratch. That single reset can consume 10–30% of your daily usage in one shot. This is what makes people feel like their daily quota is draining fast — not the per-token pricing difference, but the invisible full rebuilds happening between turns.
+
+그런데 실제로 더 아픈 건 **캐시 리셋**이에요. 기본값 5분 TTL인 줄도 모르고 쓰다가, 코드를 읽거나 생각하느라 몇 분만 쉬면 캐시가 조용히 만료돼요. 다음 프롬프트가 전체 컨텍스트를 처음부터 다시 만들어요. 이 리셋 한 번에 일간 사용량의 10~30%가 한 방에 날아갈 수 있어요. 사람들이 "일간 사용량이 팍팍 줄어든다"고 느끼는 건 토큰당 가격 차이가 아니라, 턴 사이에 보이지 않게 일어나는 전체 재구축 때문이에요.
+
+So the real question isn't "is 1h mode more expensive per token?" — it's "how much am I losing to invisible cache rebuilds that I didn't even know were happening?"
+
+그래서 진짜 질문은 "1시간 모드가 토큰당 더 비싸냐?"가 아니라, "모르는 사이에 캐시가 리셋돼서 얼마나 날리고 있었냐?"예요.
 
 ## Why this exists
 
