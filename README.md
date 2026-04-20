@@ -8,6 +8,7 @@ Claude Code를 쓸 때, **캐시가 언제 만료되는지** 그리고 **방금 
 
 **Table of Contents / 목차**
 
+- [Background / 만든 배경](#background--만든-배경)
 - [Why this exists / 왜 만들었나](#why-this-exists)
 - [Before → After](#before--after)
 - [What it does / 기능](#what-it-does--기능)
@@ -20,6 +21,24 @@ Claude Code를 쓸 때, **캐시가 언제 만료되는지** 그리고 **방금 
 - [Made by / 만든 사람](#made-by--만든-사람)
 
 ---
+
+## Background / 만든 배경
+
+Before I understood prompt caching, I just wondered why Claude Code burned through tokens so fast. Once I learned how it worked, I realized the default 5-minute TTL was a terrible fit for my workflow — I spend long stretches reading design documents, reviewing agent reasoning and chain-of-thought, coordinating with other agent sessions, and thinking before my next turn. Every time I came back after a few minutes of reading, the cache had quietly expired and the next prompt rebuilt everything from scratch. Tokens vanished.
+
+프롬프트 캐싱 개념을 알기 전에는, Claude Code 토큰이 왜 이렇게 빨리 쓰이는지 의문만 있었어요. 개념을 알고 나서야, 기본값 5분 TTL이 제 작업 방식에 전혀 맞지 않다는 걸 깨달았어요 — 저는 설계 문서를 오래 읽고, 에이전트의 추론과 chain-of-thought를 전부 읽고, 다른 에이전트 세션과 병행 작업을 하고, 다음 턴을 보내기 전에 한참 생각하는 편이거든요. 몇 분만 읽다 돌아오면 캐시가 조용히 만료돼서, 다음 프롬프트가 모든 걸 처음부터 다시 만들었어요. 토큰이 사라졌어요.
+
+I switched to 1-hour TTL immediately. Token efficiency improved dramatically. But then a new anxiety appeared: I couldn't tell whether the hour had passed or not. I'd catch myself wondering mid-thought, "has it expired yet?" So I built this counter to remove that uncertainty — to stay focused on the work instead of watching the clock in my head.
+
+곧바로 1시간 TTL로 바꿨어요. 토큰 효율이 확연히 좋아졌어요. 그런데 새로운 불안이 생겼어요: 1시간이 지났는지 안 지났는지 알 수가 없더라고요. 작업 중간에 "혹시 만료됐나?" 하고 신경 쓰이기 시작했어요. 그래서 이 카운터를 만들었어요 — 머릿속 시계를 걱정하는 대신, 작업에 집중하기 위해서.
+
+I see a lot of people on Threads frustrated about token consumption. But often the fix is surprisingly simple — a settings change that takes seconds. The real problem is that many people don't even know this lever exists, or what question to ask to find it. This isn't just a beginner issue; I've seen experienced developers with years of coding struggle with the same thing. You can't fix what you can't see.
+
+쓰레드에서 토큰 소모가 심하다고 불편을 말하는 사람들이 정말 많아요. 그런데 해결은 놀라울 정도로 간단한 경우가 많아요 — 몇 초 만에 끝나는 설정 변경 하나로요. 진짜 문제는 이 레버가 존재하는지도 모르거나, 이걸 해결하려면 어떤 맥락으로 질문해야 하는지조차 모른다는 거예요. 입문자만 그런 게 아니에요. 개발을 수년 이상 해온 경험자도 마찬가지예요. 보이지 않는 건 고칠 수 없으니까요.
+
+I hope this small tool helps you save a few more tokens, worry a little less, and enjoy the conversation with your agent a bit more.
+
+이 작은 도구가 토큰을 조금이라도 아끼고, 불안을 조금이라도 줄이고, 에이전트와의 대화를 조금 더 즐기는 데 도움이 되면 좋겠어요.
 
 ## Why this exists
 
