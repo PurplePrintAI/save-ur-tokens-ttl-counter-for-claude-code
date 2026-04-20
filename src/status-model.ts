@@ -50,17 +50,12 @@ function formatPercent(value?: number): string {
 
 function buildUsageLines(usage?: TurnUsageSummary): string[] {
   if (!usage) {
-    return ['Last completed turn: waiting for usage data'];
+    return ['Last turn: waiting'];
   }
 
   return [
-    'Last completed turn:',
-    `- Fresh input: ${formatTokens(usage.inputTokens)}`,
-    `- Cache read: ${formatTokens(usage.cacheReadTokens)}`,
-    `- Cache created: ${formatTokens(usage.cacheCreationTokens)}`,
-    `- Gross input: ${formatTokens(usage.grossInputTokens)}`,
-    `- Effective fresh: ${formatTokens(usage.effectiveInputTokens)}`,
-    `- Cache hit: ${formatPercent(usage.cacheHitRatio)}`,
+    `Last turn: ${formatTokens(usage.grossInputTokens)} tokens`,
+    `  Cache hit ${formatPercent(usage.cacheHitRatio)} · Fresh ${formatTokens(usage.effectiveInputTokens)}`,
   ];
 }
 
@@ -104,25 +99,17 @@ export function buildStatusPresentation(snapshot: TtlSnapshot, now = Date.now())
   const timeText = expired ? 'expired' : formatRemaining(remainingMs);
   const remainingRatio = expired ? 0 : remainingMs / snapshot.ttlMs;
 
-  const cacheHealthLines = [
-    '',
-    'Recent cache health:',
-    `- Turns sampled: ${snapshot.cacheHealth.recentTurns}`,
-    `- Cold starts: ${snapshot.cacheHealth.recentColdStarts}`,
-    `- Low-hit turns: ${snapshot.cacheHealth.recentLowHitTurns}`,
-  ];
+  const healthSummary = snapshot.cacheHealth.recentColdStarts > 0
+    ? `Health: ${snapshot.cacheHealth.recentColdStarts} cold start${snapshot.cacheHealth.recentColdStarts > 1 ? 's' : ''} in last ${snapshot.cacheHealth.recentTurns} turns`
+    : `Health: stable (${snapshot.cacheHealth.recentTurns} turns)`;
 
-  const recommendationLines = snapshot.recommendation
-    ? [
-      '',
-      `Recommended mode: ${getModeLabel(snapshot.recommendation.mode)}`,
-      snapshot.recommendation.reason,
-    ]
-    : [];
+  const recommendationLine = snapshot.recommendation && snapshot.recommendation.mode !== snapshot.mode
+    ? `Tip: switch to ${getModeLabel(snapshot.recommendation.mode)}`
+    : undefined;
 
   const awaitingLine = snapshot.awaitingAssistantTurn
-    ? ['', 'Current turn: waiting for the assistant response']
-    : [];
+    ? 'Generating...'
+    : undefined;
 
   return {
     text: expired
@@ -131,10 +118,11 @@ export function buildStatusPresentation(snapshot: TtlSnapshot, now = Date.now())
     tooltip: [
       ...tooltipLines,
       `TTL: ${timeText}`,
+      '',
       ...buildUsageLines(snapshot.lastCompletedTurn),
-      ...cacheHealthLines,
-      ...awaitingLine,
-      ...recommendationLines,
+      healthSummary,
+      ...(awaitingLine ? [awaitingLine] : []),
+      ...(recommendationLine ? ['', recommendationLine] : []),
     ].join('\n'),
     warning: !expired && remainingMs <= 5 * 60 * 1000,
     expired,

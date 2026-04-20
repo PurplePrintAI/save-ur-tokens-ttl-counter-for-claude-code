@@ -21,14 +21,20 @@ export class StatusBarController {
       return;
     }
 
-    if (presentation.warning) {
+    const ratio = presentation.remainingRatio;
+    if (ratio !== undefined && ratio <= 0.1) {
+      this.item.color = new vscode.ThemeColor('statusBarItem.errorForeground');
+      this.item.backgroundColor = new vscode.ThemeColor('statusBarItem.errorBackground');
+    } else if (ratio !== undefined && ratio <= 0.2) {
       this.item.color = new vscode.ThemeColor('statusBarItem.warningForeground');
       this.item.backgroundColor = new vscode.ThemeColor('statusBarItem.warningBackground');
-      return;
+    } else if (ratio !== undefined && ratio <= 0.5) {
+      this.item.color = '#e0a030';
+      this.item.backgroundColor = undefined;
+    } else {
+      this.item.color = '#4ec95e';
+      this.item.backgroundColor = undefined;
     }
-
-    this.item.color = undefined;
-    this.item.backgroundColor = undefined;
   }
 
   dispose(): void {
