@@ -168,10 +168,12 @@ MIT
 
 ## Made by / 만든 사람
 
-**PurplePrint AI** — Zero to Builder.
+I believe the gap between "having an idea" and "building it" shouldn't be this wide. Most people stop not because their idea is bad, but because they don't have the language to turn it into something real. I build tools that close that gap — so more people can start, and fewer good ideas die quiet.
 
-비개발자도 아이디어 한 줄에서 설계 완성까지. AI가 이끌어주는 설계 코칭 서비스를 만들고 있습니다.
+아이디어가 있는 것과 그걸 만드는 것 사이의 거리가 이렇게 멀 필요는 없다고 생각합니다. 대부분은 아이디어가 나빠서가 아니라, 그걸 제품으로 바꿀 언어가 없어서 멈춥니다. 저는 그 격차를 줄이는 도구를 만듭니다 — 더 많은 사람이 시작할 수 있도록, 좋은 아이디어가 조용히 사라지지 않도록.
 
-- Email: purpleprintai@gmail.com
-- Threads: [@ylkim.0to1](https://www.threads.net/@ylkim.0to1)
-- GitHub: [PurplePrintAI](https://github.com/PurplePrintAI)
+I'm a product engineer working at the intersection of AI agent systems and product design. I created [Blueprint](https://github.com/PurplePrintAI), a structured system that turns a one-line idea into a complete set of design documents through AI-guided coaching — and [PurplePrint AI](https://purpleprint-ai.com), its web incarnation where anyone can experience that process without an IDE. Currently building a founding builder network around this system, while also shipping small utilities like this TTL counter that solve real friction in daily agentic coding workflows.
+
+AI 에이전트 시스템과 제품 설계의 교차점에서 일하는 프로덕트 엔지니어입니다. 아이디어 한 줄을 AI 코칭으로 설계 문서 세트까지 완성하는 구조화된 시스템 [Blueprint](https://github.com/PurplePrintAI)를 만들었고, 누구나 IDE 없이 그 경험을 할 수 있는 웹 서비스 [PurplePrint AI](https://purpleprint-ai.com)를 운영하고 있습니다. 이 시스템을 중심으로 파운딩 빌더 네트워크를 만들어가는 중이고, 이 TTL 카운터처럼 에이전틱 코딩의 실제 마찰을 해결하는 작은 도구들도 함께 만들고 있습니다.
+
+Contact: purpleprintai@gmail.com · [@ylkim.0to1](https://www.threads.net/@ylkim.0to1)
