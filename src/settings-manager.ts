@@ -17,7 +17,7 @@ export function getTtlDurationMs(mode: TtlMode): number {
 }
 
 export function getModeLabel(mode: TtlMode): string {
-  return mode === '1h' ? '1시간 모드' : '5분 모드';
+  return mode === '1h' ? '1h mode' : '5m mode';
 }
 
 export class SettingsManager {
@@ -81,18 +81,15 @@ export class SettingsManager {
     const dir = path.dirname(this.settingsPath);
     await fs.mkdir(dir, { recursive: true });
 
-    const tempPath = path.join(
-      dir,
-      `settings.${process.pid}.${Date.now()}.tmp`,
-    );
+    const tempPath = path.join(dir, `settings.${process.pid}.${Date.now()}.tmp`);
     const content = `${JSON.stringify(settings, null, 2)}\n`;
 
     await fs.writeFile(tempPath, content, 'utf8');
 
     try {
       await fs.rename(tempPath, this.settingsPath);
-    } catch (error) {
-      // Windows에서 rename overwrite가 막히는 경우를 위한 fallback
+    } catch {
+      // Windows can reject rename-overwrite, so fall back to a direct write.
       await fs.writeFile(this.settingsPath, content, 'utf8');
       await fs.rm(tempPath, { force: true });
     }

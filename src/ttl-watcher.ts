@@ -5,12 +5,46 @@ import * as path from 'node:path';
 import { SettingsManager, TtlMode, getTtlDurationMs } from './settings-manager';
 
 interface ClaudeSessionFile {
-  pid?: number;
   sessionId?: string;
   cwd?: string;
   startedAt?: number;
-  kind?: string;
-  entrypoint?: string;
+}
+
+interface TranscriptUsagePayload {
+  input_tokens?: unknown;
+  cache_read_input_tokens?: unknown;
+  cache_creation_input_tokens?: unknown;
+  output_tokens?: unknown;
+}
+
+interface TranscriptLine {
+  type?: string;
+  timestamp?: string;
+  message?: {
+    usage?: TranscriptUsagePayload;
+  };
+}
+
+export interface TurnUsageSummary {
+  timestamp?: number;
+  inputTokens: number;
+  cacheReadTokens: number;
+  cacheCreationTokens: number;
+  outputTokens: number;
+  grossInputTokens: number;
+  effectiveInputTokens: number;
+  cacheHitRatio?: number;
+}
+
+export interface CacheHealthSummary {
+  recentTurns: number;
+  recentColdStarts: number;
+  recentLowHitTurns: number;
+}
+
+export interface ModeRecommendation {
+  mode: TtlMode;
+  reason: string;
 }
 
 export interface TtlSnapshot {
@@ -20,8 +54,19 @@ export interface TtlSnapshot {
   sessionId?: string;
   transcriptPath?: string;
   lastUserPromptAt?: number;
+  lastCompletedTurn?: TurnUsageSummary;
+  cacheHealth: CacheHealthSummary;
+  recommendation?: ModeRecommendation;
+  awaitingAssistantTurn: boolean;
   lastUpdatedAt: number;
   error?: string;
+}
+
+interface TranscriptSignals {
+  lastUserPromptAt?: number;
+  lastCompletedTurn?: TurnUsageSummary;
+  cacheHealth: CacheHealthSummary;
+  recommendation?: ModeRecommendation;
 }
 
 function normalizePath(input?: string): string | undefined {
@@ -45,6 +90,66 @@ async function pathExists(targetPath: string): Promise<boolean> {
   }
 }
 
+function toNumber(value: unknown): number {
+  return typeof value === 'number' && Number.isFinite(value) ? value : 0;
+}
+
+function buildUsageSummary(timestamp: number | undefined, usage: TranscriptUsagePayload): TurnUsageSummary {
+  const inputTokens = toNumber(usage.input_tokens);
+  const cacheReadTokens = toNumber(usage.cache_read_input_tokens);
+  const cacheCreationTokens = toNumber(usage.cache_creation_input_tokens);
+  const outputTokens = toNumber(usage.output_tokens);
+  const grossInputTokens = inputTokens + cacheReadTokens + cacheCreationTokens;
+  const effectiveInputTokens = inputTokens + cacheCreationTokens;
+  const cacheHitRatio = grossInputTokens > 0 ? cacheReadTokens / grossInputTokens : undefined;
+
+  return {
+    timestamp,
+    inputTokens,
+    cacheReadTokens,
+    cacheCreationTokens,
+    outputTokens,
+    grossInputTokens,
+    effectiveInputTokens,
+    cacheHitRatio,
+  };
+}
+
+function buildRecommendation(userPromptTimestamps: number[]): ModeRecommendation | undefined {
+  if (userPromptTimestamps.length < 2) {
+    return undefined;
+  }
+
+  const ascending = [...userPromptTimestamps].sort((a, b) => a - b);
+  const gaps: number[] = [];
+
+  for (let index = 1; index < ascending.length; index += 1) {
+    gaps.push(ascending[index] - ascending[index - 1]);
+  }
+
+  if (gaps.length === 0) {
+    return undefined;
+  }
+
+  const averageGapMs = gaps.reduce((total, gap) => total + gap, 0) / gaps.length;
+
+  if (averageGapMs >= 10 * 60 * 1000) {
+    return {
+      mode: '1h',
+      reason: 'Recent turn gaps are long enough that 1h mode is likely safer.',
+    };
+  }
+
+  if (averageGapMs <= 2 * 60 * 1000) {
+    return {
+      mode: '5m',
+      reason: 'Recent turn gaps are short, so 5m mode is likely more efficient.',
+    };
+  }
+
+  return undefined;
+}
+
 export class TtlWatcher {
   private readonly settingsManager: SettingsManager;
   private readonly sessionsDir: string;
@@ -56,6 +161,12 @@ export class TtlWatcher {
   private snapshot: TtlSnapshot = {
     mode: '5m',
     ttlMs: getTtlDurationMs('5m'),
+    cacheHealth: {
+      recentTurns: 0,
+      recentColdStarts: 0,
+      recentLowHitTurns: 0,
+    },
+    awaitingAssistantTurn: false,
     lastUpdatedAt: Date.now(),
   };
 
@@ -90,7 +201,16 @@ export class TtlWatcher {
   }
 
   getSnapshot(): TtlSnapshot {
-    return { ...this.snapshot };
+    return {
+      ...this.snapshot,
+      cacheHealth: { ...this.snapshot.cacheHealth },
+      lastCompletedTurn: this.snapshot.lastCompletedTurn
+        ? { ...this.snapshot.lastCompletedTurn }
+        : undefined,
+      recommendation: this.snapshot.recommendation
+        ? { ...this.snapshot.recommendation }
+        : undefined,
+    };
   }
 
   async refresh(): Promise<TtlSnapshot> {
@@ -102,8 +222,8 @@ export class TtlWatcher {
       const transcriptPath = activeSession?.sessionId
         ? await this.findTranscriptPath(activeSession.sessionId, activeSession.cwd)
         : undefined;
-      const lastUserPromptAt = transcriptPath
-        ? await this.findLastUserPromptTimestamp(transcriptPath)
+      const transcriptSignals = transcriptPath
+        ? await this.readTranscriptSignals(transcriptPath)
         : undefined;
 
       this.snapshot = {
@@ -112,7 +232,22 @@ export class TtlWatcher {
         ttlMs,
         sessionId: activeSession?.sessionId,
         transcriptPath,
-        lastUserPromptAt,
+        lastUserPromptAt: transcriptSignals?.lastUserPromptAt,
+        lastCompletedTurn: transcriptSignals?.lastCompletedTurn,
+        cacheHealth: transcriptSignals?.cacheHealth ?? {
+          recentTurns: 0,
+          recentColdStarts: 0,
+          recentLowHitTurns: 0,
+        },
+        recommendation: transcriptSignals?.recommendation,
+        awaitingAssistantTurn:
+          Boolean(
+            transcriptSignals?.lastUserPromptAt
+            && (
+              !transcriptSignals.lastCompletedTurn?.timestamp
+              || transcriptSignals.lastCompletedTurn.timestamp < transcriptSignals.lastUserPromptAt
+            ),
+          ),
         lastUpdatedAt: Date.now(),
       };
     } catch (error) {
@@ -120,6 +255,12 @@ export class TtlWatcher {
         workspacePath: this.workspacePath,
         mode,
         ttlMs,
+        cacheHealth: {
+          recentTurns: 0,
+          recentColdStarts: 0,
+          recentLowHitTurns: 0,
+        },
+        awaitingAssistantTurn: false,
         lastUpdatedAt: Date.now(),
         error: error instanceof Error ? error.message : String(error),
       };
@@ -235,7 +376,7 @@ export class TtlWatcher {
     return undefined;
   }
 
-  private async findLastUserPromptTimestamp(jsonlPath: string): Promise<number | undefined> {
+  private async readTranscriptSignals(jsonlPath: string): Promise<TranscriptSignals> {
     const handle = await fs.open(jsonlPath, 'r');
 
     try {
@@ -243,6 +384,11 @@ export class TtlWatcher {
       const chunkSize = 64 * 1024;
       let position = stat.size;
       let remainder = '';
+
+      let lastUserPromptAt: number | undefined;
+      let lastCompletedTurn: TurnUsageSummary | undefined;
+      const recentAssistantUsages: TurnUsageSummary[] = [];
+      const recentUserPromptAts: number[] = [];
 
       while (position > 0) {
         const readSize = Math.min(chunkSize, position);
@@ -260,33 +406,85 @@ export class TtlWatcher {
         }
 
         for (let index = lines.length - 1; index >= 0; index -= 1) {
-          const timestamp = this.parseUserTimestamp(lines[index]);
-          if (timestamp) {
-            return timestamp;
+          const parsed = this.parseTranscriptLine(lines[index]);
+          if (!parsed) {
+            continue;
+          }
+
+          if (
+            parsed.type === 'assistant'
+            && parsed.message?.usage
+            && recentAssistantUsages.length < 5
+          ) {
+            const timestamp = parsed.timestamp ? Date.parse(parsed.timestamp) : undefined;
+            const usage = buildUsageSummary(
+              Number.isNaN(timestamp ?? Number.NaN) ? undefined : timestamp,
+              parsed.message.usage,
+            );
+            recentAssistantUsages.push(usage);
+            if (!lastCompletedTurn) {
+              lastCompletedTurn = usage;
+            }
+          }
+
+          if (parsed.type === 'user' && parsed.timestamp) {
+            const timestamp = Date.parse(parsed.timestamp);
+            if (!Number.isNaN(timestamp)) {
+              if (!lastUserPromptAt) {
+                lastUserPromptAt = timestamp;
+              }
+
+              if (recentUserPromptAts.length < 5) {
+                recentUserPromptAts.push(timestamp);
+              }
+            }
+          }
+
+          if (lastUserPromptAt && recentAssistantUsages.length >= 5 && recentUserPromptAts.length >= 5) {
+            break;
+          }
+        }
+
+        if (lastUserPromptAt && recentAssistantUsages.length >= 5 && recentUserPromptAts.length >= 5) {
+          break;
+        }
+      }
+
+      if (remainder) {
+        const parsed = this.parseTranscriptLine(remainder);
+        if (parsed?.type === 'user' && parsed.timestamp && !lastUserPromptAt) {
+          const timestamp = Date.parse(parsed.timestamp);
+          if (!Number.isNaN(timestamp)) {
+            lastUserPromptAt = timestamp;
           }
         }
       }
 
-      return this.parseUserTimestamp(remainder);
+      const cacheHealth: CacheHealthSummary = {
+        recentTurns: recentAssistantUsages.length,
+        recentColdStarts: recentAssistantUsages.filter((usage) => usage.cacheReadTokens === 0 && usage.cacheCreationTokens > 0).length,
+        recentLowHitTurns: recentAssistantUsages.filter((usage) => usage.cacheHitRatio !== undefined && usage.cacheHitRatio < 0.2).length,
+      };
+
+      return {
+        lastUserPromptAt,
+        lastCompletedTurn,
+        cacheHealth,
+        recommendation: buildRecommendation(recentUserPromptAts),
+      };
     } finally {
       await handle.close();
     }
   }
 
-  private parseUserTimestamp(line: string): number | undefined {
+  private parseTranscriptLine(line: string): TranscriptLine | undefined {
     const trimmed = line.trim();
     if (!trimmed) {
       return undefined;
     }
 
     try {
-      const parsed = JSON.parse(trimmed) as { type?: string; timestamp?: string };
-      if (parsed.type !== 'user' || !parsed.timestamp) {
-        return undefined;
-      }
-
-      const timestamp = Date.parse(parsed.timestamp);
-      return Number.isNaN(timestamp) ? undefined : timestamp;
+      return JSON.parse(trimmed) as TranscriptLine;
     } catch {
       return undefined;
     }

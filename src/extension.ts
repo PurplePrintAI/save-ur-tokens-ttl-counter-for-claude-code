@@ -40,12 +40,14 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
   let soonNotifiedKey: string | undefined;
   let expiredNotifiedKey: string | undefined;
+  let cacheWarningKey: string | undefined;
 
   const maybeNotify = (snapshot: TtlSnapshot): void => {
     const remainingMs = getRemainingMs(snapshot);
     if (remainingMs === undefined || !snapshot.sessionId || !snapshot.lastUserPromptAt) {
       soonNotifiedKey = undefined;
       expiredNotifiedKey = undefined;
+      cacheWarningKey = undefined;
       return;
     }
 
@@ -54,14 +56,39 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     if (remainingMs <= 0) {
       if (expiredNotifiedKey !== notificationKey) {
         expiredNotifiedKey = notificationKey;
-        vscode.window.showWarningMessage('캐시 TTL이 만료됐어요. 다음 프롬프트에서 캐시가 재생성됩니다.');
+        void vscode.window.showWarningMessage(
+          'Prompt cache TTL expired. The next prompt will likely rebuild cache from scratch.',
+        );
       }
       return;
     }
 
     if (remainingMs <= 5 * 60 * 1000 && soonNotifiedKey !== notificationKey) {
       soonNotifiedKey = notificationKey;
-      vscode.window.showInformationMessage('캐시 TTL이 5분 이하입니다. 곧 캐시가 초기화돼요.');
+      void vscode.window.showInformationMessage(
+        'Prompt cache TTL is under five minutes. If you expect a long pause, 1h mode may be safer.',
+      );
+    }
+
+    const lastUsage = snapshot.lastCompletedTurn;
+    if (!lastUsage?.timestamp) {
+      return;
+    }
+
+    const frequentResetKey = `${snapshot.sessionId}:${lastUsage.timestamp}:${snapshot.cacheHealth.recentColdStarts}`;
+    if (
+      snapshot.cacheHealth.recentColdStarts >= 2
+      && cacheWarningKey !== frequentResetKey
+    ) {
+      cacheWarningKey = frequentResetKey;
+
+      const suggestedMode = snapshot.recommendation && snapshot.recommendation.mode !== snapshot.mode
+        ? ` Consider switching to ${getModeLabel(snapshot.recommendation.mode)}.`
+        : '';
+
+      void vscode.window.showWarningMessage(
+        `Recent prompt cache resets look frequent. This can waste tokens by rebuilding fresh input.${suggestedMode}`,
+      );
     }
   };
 
@@ -84,16 +111,16 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     const options: Array<vscode.QuickPickItem & { mode?: TtlMode }> = [
       {
         label: currentMode === '1h'
-          ? '$(check) 1시간 모드'
-          : '$(circle-outline) 1시간 모드',
-        description: currentMode === '1h' ? `사용 중 · ${remainingText}` : '전환하기',
+          ? '$(check) 1h mode'
+          : '$(circle-outline) 1h mode',
+        description: currentMode === '1h' ? `Current · ${remainingText}` : 'Switch',
         mode: '1h',
       },
       {
         label: currentMode === '5m'
-          ? '$(check) 5분 모드'
-          : '$(circle-outline) 5분 모드',
-        description: currentMode === '5m' ? `사용 중 · ${remainingText}` : '전환하기',
+          ? '$(check) 5m mode'
+          : '$(circle-outline) 5m mode',
+        description: currentMode === '5m' ? `Current · ${remainingText}` : 'Switch',
         mode: '5m',
       },
     ];
@@ -109,7 +136,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     await settingsManager.setMode(selected.mode);
     await watcher.refresh();
     render();
-    vscode.window.showInformationMessage(`TTL 모드를 ${getModeLabel(selected.mode)}로 변경했어요.`);
+
+    void vscode.window.showInformationMessage(`TTL mode switched to ${getModeLabel(selected.mode)}.`);
   });
 
   const workspaceDisposable = vscode.workspace.onDidChangeWorkspaceFolders(() => {

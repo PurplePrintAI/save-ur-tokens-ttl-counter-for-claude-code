@@ -1,0 +1,22 @@
+{
+  "name": "claude-ttl-counter-install",
+  "version": "0.1.0",
+  "description": "One-command installer for Claude TTL Counter VS Code/Cursor extension",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/PurplePrintAI/claude-ttl-counter"
+  },
+  "bin": {
+    "claude-ttl-counter-install": "bin/install.js"
+  },
+  "keywords": [
+    "claude",
+    "claude-code",
+    "ttl",
+    "prompt-cache",
+    "vscode",
+    "cursor",
+    "installer"
+  ]
+}

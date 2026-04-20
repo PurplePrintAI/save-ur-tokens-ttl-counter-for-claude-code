@@ -1,7 +1,7 @@
 {
   "name": "claude-ttl-counter",
   "displayName": "Claude TTL Counter",
-  "description": "Claude Code prompt cache TTL countdown + mode toggle / Claude Code 프롬프트 캐시 TTL 카운트다운 + 모드 토글",
+  "description": "Claude Code prompt cache TTL countdown and cache visibility / Claude Code 프롬프트 캐시 TTL 카운트다운과 캐시 가시성 도구",
   "version": "0.1.0",
   "publisher": "purpleprintai",
   "license": "MIT",
@@ -20,6 +20,7 @@
     "claude-code",
     "ttl",
     "prompt-cache",
+    "cache",
     "token"
   ],
   "activationEvents": [
@@ -30,7 +31,7 @@
     "commands": [
       {
         "command": "claudeTtl.toggleMode",
-        "title": "Claude TTL: 캐시 모드 변경"
+        "title": "Claude TTL: Toggle cache mode"
       }
     ]
   },
