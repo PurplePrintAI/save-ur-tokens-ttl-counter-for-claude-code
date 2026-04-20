@@ -1,0 +1,47 @@
+{
+  "name": "claude-ttl-counter",
+  "displayName": "Claude TTL Counter",
+  "description": "Claude Code prompt cache TTL countdown + mode toggle",
+  "version": "0.1.0",
+  "publisher": "purpleprintai",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/PurplePrintAI/claude-ttl-counter"
+  },
+  "engines": {
+    "vscode": "^1.99.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "keywords": [
+    "claude",
+    "claude-code",
+    "ttl",
+    "prompt-cache",
+    "token"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "claudeTtl.toggleMode",
+        "title": "Claude TTL: 캐시 모드 변경"
+      }
+    ]
+  },
+  "scripts": {
+    "compile": "tsc -p .",
+    "build": "npm run compile",
+    "watch": "tsc -watch -p ."
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.21",
+    "@types/vscode": "^1.99.0",
+    "typescript": "^5.8.3"
+  }
+}
