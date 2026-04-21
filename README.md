@@ -55,6 +55,20 @@ So the real question isn't "is this model too expensive?" — it's "how much am 
 
 그래서 진짜 질문은 "이 모델이 비싼 건가?"가 아니라, "모르는 사이에 캐시가 리셋돼서 얼마나 날리고 있었냐?"예요.
 
+### Community discussions / 커뮤니티에서도 같은 문제를 겪고 있어요
+
+This isn't a niche issue. In early March 2025, Anthropic quietly changed the default prompt cache TTL from 1 hour to 5 minutes without prior announcement. Users across Reddit immediately noticed their daily usage limits draining far faster than before — many hitting the 5-hour quota cap for the first time. The community traced the root cause back to this silent TTL change, and the discussion quickly escalated into a transparency debate.
+
+이건 일부만 겪는 문제가 아니에요. 2025년 3월 초, Anthropic이 프롬프트 캐시 TTL 기본값을 1시간에서 5분으로 사전 공지 없이 변경했어요. Reddit에서 즉시 "갑자기 일간 사용량이 급감한다"는 보고가 쏟아졌고, 많은 유저가 5시간 쿼터 제한에 처음으로 도달했어요. 커뮤니티가 원인을 추적해서 이 조용한 TTL 변경이 근본 원인이라는 걸 밝혀냈고, 투명성 논란으로 번졌어요.
+
+- **[Reddit r/ClaudeAI — "Did they just find the issue with Claude cache?"](https://www.reddit.com/r/ClaudeAI/comments/1sjxrp1/did_they_just_find_the_issue_with_claude_cache/)** (Apr 13, 2025) — The post that first connected the dots: the sudden spike in Opus daily usage starting early March traced back to Anthropic's silent TTL default change on March 6th.
+  3월 초부터 Opus 일간 사용량이 급증한 현상의 원인이 TTL 기본값 변경이었다는 걸 처음 연결한 포스트.
+
+- **[Reddit r/ClaudeCode — "Followup: Anthropic quietly switched the default TTL"](https://www.reddit.com/r/ClaudeCode/comments/1sk3iyq/followup_anthropic_quietly_switched_the_default/)** (Apr 13, 2025) — Follow-up with evidence: 17–32% increase in cache rebuild costs confirmed. Multiple users reporting first-time quota hits. Community demanding advance notice for cost-affecting changes.
+  후속 포스트. 캐시 재생성 비용 17~32% 증가 확인. "처음으로 쿼터에 도달했다"는 다수 보고. 비용 변경은 사전 공지가 필수라는 요구.
+
+- **[GeekNews (한국어) — 같은 사건 토론](https://news.hada.io/topic?id=28461)** (Apr 13, 2025) — Korean developer community discussion of the same incident. Frustration over silent policy changes, some teams already switching tools.
+  같은 사건의 한국어 개발자 커뮤니티 토론. 무공지 정책 변경에 대한 불만과 일부 팀의 도구 전환 움직임.
 
 ## Why this exists
 
