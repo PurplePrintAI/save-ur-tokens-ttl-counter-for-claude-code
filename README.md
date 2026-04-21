@@ -259,6 +259,10 @@ What this means in practice: if you switch from `5m` → `1h` and **more than 5 
 >
 > **모드 바꾼 직후 첫 턴이 무겁게 느껴져도 걱정하지 마세요.** 이전 설정의 마지막 잔향일 가능성이 높아요 — 변경이 안 된 게 아니에요. 두 번째 턴부터는 새 TTL이 적용되고 있어요.
 
+> **Accidentally switched? No worries.** If you switch modes and switch back *before* sending a prompt, nothing changes — no new cache is created, no tokens spent. The setting only takes effect when you actually send your next prompt.
+>
+> **실수로 전환했어도 걱정 없어요.** 모드를 바꿨다가 프롬프트를 보내기 *전에* 다시 되돌리면, 아무 일도 안 일어나요 — 새 캐시가 만들어지지 않고, 토큰도 소모되지 않아요. 설정은 실제로 다음 프롬프트를 보낼 때만 적용돼요.
+
 ## Install / 설치
 
 ### Option 1: npm (recommended / 추천)
