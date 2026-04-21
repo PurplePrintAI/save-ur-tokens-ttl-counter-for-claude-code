@@ -1,8 +1,8 @@
 # Claude TTL Counter
 
-Claude TTL Counter is a lightweight VS Code / Cursor extension that helps you see **when Claude Code prompt cache will expire** and how much of your recent turn was actually reused from cache.
+**Stop losing daily usage to invisible cache resets.** This lightweight VS Code / Cursor extension shows you when Claude Code prompt cache will expire and how much of your recent turn was actually reused — so you can take your time reading, thinking, and prompting without worrying about tokens silently melting away.
 
-Claude Code를 쓸 때, **캐시가 언제 만료되는지** 그리고 **방금 턴에서 캐시가 실제로 얼마나 재활용됐는지** 한눈에 볼 수 있는 가벼운 VS Code / Cursor 확장이에요.
+**보이지 않는 캐시 리셋에 일간 사용량을 잃지 마세요.** 캐시가 언제 만료되는지, 방금 턴에서 캐시가 실제로 얼마나 재활용됐는지 보여주는 가벼운 VS Code / Cursor 확장이에요 — 토큰이 조용히 녹아내리는 걸 걱정하지 않고, 여유롭게 읽고 생각하고 프롬프트할 수 있어요.
 
 ---
 
