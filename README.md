@@ -61,8 +61,8 @@ This isn't a niche issue. In early March 2025, Anthropic quietly changed the def
 
 이건 일부만 겪는 문제가 아니에요. 2025년 3월 초, Anthropic이 프롬프트 캐시 TTL 기본값을 1시간에서 5분으로 사전 공지 없이 변경했어요. Reddit에서 즉시 "갑자기 일간 사용량이 급감한다"는 보고가 쏟아졌고, 많은 유저가 5시간 쿼터 제한에 처음으로 도달했어요. 커뮤니티가 원인을 추적해서 이 조용한 TTL 변경이 근본 원인이라는 걸 밝혀냈고, 투명성 논란으로 번졌어요.
 
-- **[Reddit r/ClaudeAI — "Did they just find the issue with Claude cache?"](https://www.reddit.com/r/ClaudeAI/comments/1sjxrp1/did_they_just_find_the_issue_with_claude_cache/)** (Apr 13, 2025) — The post that first connected the dots: the sudden spike in Opus daily usage starting early March traced back to Anthropic's silent TTL default change on March 6th.
-  3월 초부터 Opus 일간 사용량이 급증한 현상의 원인이 TTL 기본값 변경이었다는 걸 처음 연결한 포스트.
+- **[Reddit r/ClaudeAI — "Did they just find the issue with Claude cache?"](https://www.reddit.com/r/ClaudeAI/comments/1sjxrp1/did_they_just_find_the_issue_with_claude_cache/)** (Apr 13, 2025) — The post that first suspected the link: the sudden spike in Opus daily usage starting early March might be related to Anthropic's silent TTL default change on March 6th. Not confirmed, but the timing and symptoms align.
+  3월 초부터 Opus 일간 사용량이 급증한 현상의 원인이 TTL 기본값 변경일 수 있다고 처음 추정한 포스트. 확정은 아니지만 시점과 증상이 일치.
 
 - **[Reddit r/ClaudeCode — "Followup: Anthropic quietly switched the default TTL"](https://www.reddit.com/r/ClaudeCode/comments/1sk3iyq/followup_anthropic_quietly_switched_the_default/)** (Apr 13, 2025) — Follow-up with evidence: 17–32% increase in cache rebuild costs confirmed. Multiple users reporting first-time quota hits. Community demanding advance notice for cost-affecting changes.
   후속 포스트. 캐시 재생성 비용 17~32% 증가 확인. "처음으로 쿼터에 도달했다"는 다수 보고. 비용 변경은 사전 공지가 필수라는 요구.
@@ -310,9 +310,9 @@ If you found this repo because your token usage feels out of control, here are a
 
 **매 턴이 소통 비용이에요.** 에이전트와 나누는 매 메시지가 누적된 컨텍스트를 토큰으로 소모해요. 프롬프트 캐싱이 도와주지만, 근본적으로 컨텍스트가 커지면 비용도 커져요. 핵심은 턴당 토큰을 줄이는 것보다, 턴 자체를 줄이는 게 더 효과적일 때가 많다는 거예요 — 회의 시간을 줄이는 것보다 회의 횟수를 줄이는 게 나은 것처럼.
 
-**Agents don't read 100% unless you tell them to.** Multi-agent, sub-agent setups can be efficient for some tasks, but they tend to skim rather than fully read. Important context gets lost, design documents and code drift apart, and the output quality drops — quietly. If the work is high-context, make sure the agent reads everything fully.
+**Agents don't read 100% unless you tell them to.** Multi-agent, sub-agent setups can be efficient for some tasks, but they tend to skim rather than fully read. Important context gets lost, design documents and code drift apart, and the output quality drops — quietly. On top of that, they consume a lot of tokens. The result: your daily usage burns fast, but the work moves forward with critical context missing. That's why my harness is designed to only summon multi-agent/sub-agents for specific task types. For high-context work, having the main agent read everything fully turned out to save tokens *and* produce better results.
 
-**에이전트는 시키지 않으면 100% 안 읽어요.** 멀티에이전트, 서브에이전트가 효율적인 작업도 있지만, 대부분 전체를 읽기보다 훑어요. 중요한 맥락이 빠지고, 설계 문서와 코드가 어긋나고, 결과 품질이 조용히 떨어져요. 고맥락 작업이라면 에이전트가 전부 읽게 해야 해요.
+**에이전트는 시키지 않으면 100% 안 읽어요.** 멀티에이전트, 서브에이전트가 효율적인 작업도 있지만, 대부분 전체를 읽기보다 훑어요. 중요한 맥락이 빠지고, 설계 문서와 코드가 어긋나고, 결과 품질이 조용히 떨어져요. 게다가 토큰을 꽤 많이 잡아먹어요. 그 결과, 일간 사용량이 확 소모되는데, 중요 맥락이 누락된 채로 작업이 진행되는 경우가 많았어요. 그래서 제 하네스는 멀티에이전트/서브에이전트를 특수한 작업 케이스에서만 소환하도록 설계해뒀어요. 고맥락 작업이라면 메인 에이전트가 전부 읽게 하는 게 결과적으로 토큰도 절약되고, 작업 결과 품질도 좋았어요.
 
 **Your prompting quality determines token efficiency.** The better you structure what you ask — clear context, specific requirements, one instruction at a time — the fewer turns it takes to get the right result. This is the real leverage point.
 
