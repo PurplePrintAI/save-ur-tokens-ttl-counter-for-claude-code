@@ -350,9 +350,9 @@ Now I build tools at that intersection. I've built a structured harness framewor
 
 지금은 그 교차점에서 도구를 만들어요. 서비스를 만드는 여정 전체를 구조화한 하네스 프레임워크(비공개 레포)를 만들었어요 — 문제 정의와 페르소나부터, 설계 문서, UX, 브랜딩, 마케팅 전략, 개발 핸드오프까지. AI가 그냥 질문에 답하는 게 아니라, 뭘 물어야 하는지를 알고, 어떤 순서로 물어야 하는지 알고, 당신의 답을 실제 설계 산출물로 구조화해줘요. 24시간 일하면서 맥락을 절대 잃지 않는 시니어 PM을 아이디어에 붙여주는 느낌이에요. 그리고 이 하네스를 복잡한 IDE 없이도 누구나 경험할 수 있는 웹 서비스를 만들고 있어요.
 
-I'm working with a small group of founding builders — people with domain expertise and real ideas, but with a genuine intention to solve real problems and inefficiencies. Using the harness I've built and everything I've learned along the way, I'm helping them turn their ideas into real products. We're starting small, learning by doing, and improving together.
+I'm working with a small group of founding builders — people with deep domain expertise and real ideas, but who haven't been through the full service design → build → GTM journey before, and are just getting started with agentic coding. They have a genuine intention to solve real problems and inefficiencies in their domains. Using the harness I've built and everything I've learned along the way, I'm helping them turn their ideas into real products. We're starting small, learning by doing, and improving together.
 
-지금은 제가 구축한 하네스, 그리고 지금까지의 모든 경험을 토대로 소수의 파운딩 빌더들을 돕고 있어요. 선한 의도를 토대로 문제와 비효율을 해결하려는 사람들이에요. 각자의 아이디어를 실제 제품으로 만들면서, 소수로 시작해서, 직접 해보면서 배우고, 함께 개선해나가는 구조예요.
+지금은 제가 구축한 하네스, 그리고 지금까지의 모든 경험을 토대로 소수의 파운딩 빌더들을 돕고 있어요. 도메인 전문성과 진짜 아이디어가 있지만, 서비스 설계 → 구현 → 사업화(GTM) 여정을 처음부터 끝까지 경험해본 적은 없고, 에이전틱 코딩도 이제 막 시작하는 분들이에요. 선한 의도를 토대로 자기 도메인의 문제와 비효율을 해결하려는 사람들이에요. 소수로 시작해서, 직접 해보면서 배우고, 함께 개선해나가는 구조예요.
 
 On the side, I ship small open-source utilities like this TTL counter that solve real friction points I hit every day in agentic coding workflows.
 
