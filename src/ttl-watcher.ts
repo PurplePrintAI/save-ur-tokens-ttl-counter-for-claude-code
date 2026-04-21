@@ -264,7 +264,7 @@ function buildRecommendation(
 
     return {
       mode: '5m',
-      reason: '5m mode may save tokens.',
+      reason: 'Tip: 5m mode may save tokens.',
     };
   }
 
@@ -279,13 +279,13 @@ function buildRecommendation(
   if (medianGapMs <= STRONG_RECOMMEND_1H_MIN_MEDIAN_GAP_MS) {
     return {
       mode: '1h',
-      reason: '1h mode is safer.',
+      reason: 'Tip: 1h mode is safer.',
     };
   }
 
   return {
     mode: '1h',
-    reason: 'Strongly recommend 1h mode.',
+    reason: 'Tip: strongly recommend 1h mode.',
   };
 }
 

@@ -114,7 +114,7 @@ export function buildStatusPresentation(snapshot: TtlSnapshot, now = Date.now())
     : vscode.l10n.t('Health: stable ({0} turns)', healthTurns);
 
   const recommendationLine = snapshot.recommendation && snapshot.recommendation.mode !== snapshot.mode
-    ? vscode.l10n.t('Tip: switch to {0}', getModeLabel(snapshot.recommendation.mode))
+    ? vscode.l10n.t(snapshot.recommendation.reason)
     : undefined;
 
   const awaitingLine = snapshot.awaitingAssistantTurn
