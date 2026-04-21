@@ -1,4 +1,4 @@
-# Claude TTL Counter
+# Save ur tokens! — Claude TTL Counter
 
 **"I barely used it today, but my daily limit is already gone."** If that sounds familiar, it's probably not the model — it's an invisible cache setting that doesn't match how you actually work. Claude Code has a prompt cache that reuses previous context, but it expires silently. When it does, the next turn rebuilds everything from scratch — and that single reset can eat 10–30% of your daily usage in one shot.
 
