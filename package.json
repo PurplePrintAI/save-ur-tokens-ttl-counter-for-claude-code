@@ -7,7 +7,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/PurplePrintAI/claude-ttl-counter"
+    "url": "https://github.com/PurplePrintAI/save-ur-tokens-ttl-counter-for-claude-code"
   },
   "engines": {
     "vscode": "^1.99.0"

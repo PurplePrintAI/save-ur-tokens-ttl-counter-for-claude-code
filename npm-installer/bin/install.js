@@ -7,7 +7,7 @@ const path = require('path');
 const { execSync } = require('child_process');
 const os = require('os');
 
-const REPO = 'PurplePrintAI/claude-ttl-counter';
+const REPO = 'PurplePrintAI/save-ur-tokens-ttl-counter-for-claude-code';
 const VSIX_NAME = 'claude-ttl-counter';
 
 function log(msg) {
