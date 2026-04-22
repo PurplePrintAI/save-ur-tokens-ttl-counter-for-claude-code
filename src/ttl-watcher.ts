@@ -522,11 +522,14 @@ export class TtlWatcher {
       }
     }
 
-    matches.sort((a, b) =>
-      (b.activityAt ?? 0) - (a.activityAt ?? 0)
-      || (b.transcriptLastWriteAt ?? 0) - (a.transcriptLastWriteAt ?? 0)
-      || (b.startedAt ?? 0) - (a.startedAt ?? 0),
-    );
+    matches.sort((a, b) => {
+      const aHasTranscript = a.transcriptPath ? 1 : 0;
+      const bHasTranscript = b.transcriptPath ? 1 : 0;
+      if (bHasTranscript !== aHasTranscript) return bHasTranscript - aHasTranscript;
+      return (b.activityAt ?? 0) - (a.activityAt ?? 0)
+        || (b.transcriptLastWriteAt ?? 0) - (a.transcriptLastWriteAt ?? 0)
+        || (b.startedAt ?? 0) - (a.startedAt ?? 0);
+    });
     return matches[0];
   }
 

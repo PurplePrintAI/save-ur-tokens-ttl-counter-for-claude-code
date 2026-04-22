@@ -26,12 +26,12 @@ export class StatusBarController {
         this.item.backgroundColor = new vscode.ThemeColor('statusBarItem.warningBackground');
         return;
       case 'turn_usage':
-        this.item.color = new vscode.ThemeColor('statusBarItem.prominentForeground');
+        this.item.color = '#ffffff';
         this.item.backgroundColor = new vscode.ThemeColor('statusBarItem.prominentBackground');
         return;
       case 'rate_limit':
-        this.item.color = new vscode.ThemeColor('statusBarItem.remoteForeground');
-        this.item.backgroundColor = new vscode.ThemeColor('statusBarItem.remoteBackground');
+        this.item.color = '#ffffff';
+        this.item.backgroundColor = new vscode.ThemeColor('statusBarItem.warningBackground');
         return;
       case 'countdown':
       default:
