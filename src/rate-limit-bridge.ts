@@ -39,6 +39,19 @@ function toFiniteNumber(value: unknown): number | undefined {
     : undefined;
 }
 
+function toTimestamp(value: unknown): number | undefined {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return value;
+  }
+
+  if (typeof value === 'string' && value.trim()) {
+    const parsed = Date.parse(value);
+    return Number.isNaN(parsed) ? undefined : parsed;
+  }
+
+  return undefined;
+}
+
 function toStringValue(value: unknown): string | undefined {
   return typeof value === 'string' && value.trim()
     ? value
@@ -67,9 +80,9 @@ function parseRateLimitPayload(
     updatedAt: toFiniteNumber(parsed.updated_at ?? parsed.updatedAt) ?? updatedAt,
     sourcePath,
     fiveHourUsedPercentage: toFiniteNumber(fiveHour?.used_percentage ?? fiveHour?.usedPercentage),
-    fiveHourResetsAt: toFiniteNumber(fiveHour?.resets_at ?? fiveHour?.resetsAt),
+    fiveHourResetsAt: toTimestamp(fiveHour?.resets_at ?? fiveHour?.resetsAt),
     sevenDayUsedPercentage: toFiniteNumber(sevenDay?.used_percentage ?? sevenDay?.usedPercentage),
-    sevenDayResetsAt: toFiniteNumber(sevenDay?.resets_at ?? sevenDay?.resetsAt),
+    sevenDayResetsAt: toTimestamp(sevenDay?.resets_at ?? sevenDay?.resetsAt),
   };
 }
 
