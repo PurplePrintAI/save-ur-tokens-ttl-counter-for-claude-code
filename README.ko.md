@@ -71,7 +71,7 @@
 | **Quick Pick** | `1시간 모드 · 현재 · 42:15` | 클릭해서 모드 전환 |
 | **알림** | `"캐시 초기화가 자주 보여요..."` | cold start 2회 이상 시 경고 |
 
-> **"왜 5h/7d가 안 보이지?"** 5h/7d 표시는 statusline bridge가 필요해요. **터미널 CLI**로 Claude Code를 쓰면 statusline을 통해 자동으로 동작해요. 하지만 **VS Code extension**으로 쓰면 statusline이 실행되지 않아서 아직 자동 지원이 안 돼요 — [대안을 연구 중](https://github.com/PurplePrintAI/save-ur-tokens-ttl-counter-for-claude-code/issues/1)이에요. bridge 없이는 `TTL → 턴 사용량 → TTL`로만 순환해요.
+> **"왜 5h/7d가 안 보이지?"** 5h/7d 사용률 표시는 아직 자동으로 지원되지 않아요. `~/.claude/ttl-counter-rate-limits.json`에 데이터가 있으면 표시할 수 있지만, VS Code extension 환경에서 이 파일을 자동으로 채우는 방법이 현재 없어요. [대안을 연구 중](https://github.com/PurplePrintAI/save-ur-tokens-ttl-counter-for-claude-code/issues/1)이에요. 지금은 `TTL → 턴 사용량 → TTL`로만 순환해요.
 
 ## 어떤 모드를 쓸까
 
