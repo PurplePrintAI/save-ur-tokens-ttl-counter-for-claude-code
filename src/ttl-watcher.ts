@@ -510,7 +510,7 @@ export class TtlWatcher {
       throw error;
     }
 
-    const matches: ResolvedClaudeSession[] = [];
+    const matchesBySessionId = new Map<string, ResolvedClaudeSession>();
 
     for (const entry of entries) {
       if (!entry.isFile() || !entry.name.endsWith('.json')) {
@@ -537,7 +537,7 @@ export class TtlWatcher {
           : undefined;
         const activityAt = Math.max(session.startedAt ?? 0, transcriptLastWriteAt ?? 0);
 
-        matches.push({
+        matchesBySessionId.set(session.sessionId, {
           ...session,
           transcriptPath,
           transcriptLastWriteAt,
@@ -548,6 +548,30 @@ export class TtlWatcher {
       }
     }
 
+    const workspaceTranscripts = await this.findWorkspaceTranscriptCandidates(workspacePath);
+    for (const transcriptCandidate of workspaceTranscripts) {
+      const existing = transcriptCandidate.sessionId
+        ? matchesBySessionId.get(transcriptCandidate.sessionId)
+        : undefined;
+
+      if (!transcriptCandidate.sessionId) {
+        continue;
+      }
+
+      matchesBySessionId.set(transcriptCandidate.sessionId, {
+        ...existing,
+        ...transcriptCandidate,
+        cwd: existing?.cwd ?? transcriptCandidate.cwd,
+        startedAt: existing?.startedAt,
+        activityAt: Math.max(
+          existing?.startedAt ?? 0,
+          transcriptCandidate.transcriptLastWriteAt ?? 0,
+          existing?.transcriptLastWriteAt ?? 0,
+        ),
+      });
+    }
+
+    const matches = Array.from(matchesBySessionId.values());
     matches.sort((a, b) => {
       const aHasTranscript = a.transcriptPath ? 1 : 0;
       const bHasTranscript = b.transcriptPath ? 1 : 0;
@@ -557,6 +581,49 @@ export class TtlWatcher {
         || (b.startedAt ?? 0) - (a.startedAt ?? 0);
     });
     return matches[0];
+  }
+
+  private async findWorkspaceTranscriptCandidates(workspacePath: string): Promise<ResolvedClaudeSession[]> {
+    const projectDir = path.join(this.projectsDir, workspaceSlug(workspacePath));
+
+    let entries;
+    try {
+      entries = await fs.readdir(projectDir, { withFileTypes: true });
+    } catch (error) {
+      const nodeError = error as NodeJS.ErrnoException;
+      if (nodeError.code === 'ENOENT') {
+        return [];
+      }
+
+      throw error;
+    }
+
+    const candidates: ResolvedClaudeSession[] = [];
+
+    for (const entry of entries) {
+      if (!entry.isFile() || !entry.name.endsWith('.jsonl')) {
+        continue;
+      }
+
+      const transcriptPath = path.join(projectDir, entry.name);
+      const transcriptLastWriteAt = await getLastWriteTimeMs(transcriptPath);
+      if (transcriptLastWriteAt === undefined) {
+        continue;
+      }
+
+      const sessionId = entry.name.slice(0, -'.jsonl'.length);
+      this.transcriptPathCache.set(sessionId, transcriptPath);
+
+      candidates.push({
+        sessionId,
+        cwd: workspacePath,
+        transcriptPath,
+        transcriptLastWriteAt,
+        activityAt: transcriptLastWriteAt,
+      });
+    }
+
+    return candidates;
   }
 
   private async findTranscriptPath(sessionId: string, sessionCwd?: string): Promise<string | undefined> {
