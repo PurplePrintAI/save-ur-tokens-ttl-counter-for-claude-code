@@ -4,6 +4,17 @@ All notable changes to Claude TTL Counter.
 
 ---
 
+## [0.5.0] — 2026-04-23
+
+### Fixed
+- **Same-project session switching sync** — when two Claude sessions are open in the same workspace, the counter now follows the session with the latest transcript activity instead of staying stuck on the previous session
+- **Active session selection** — workspace transcript candidates are now merged with `~/.claude/sessions/*.json` candidates, so switching between session A/B in the same project updates the counter to the correct session
+
+### Changed
+- **Session detection priority** — active session resolution now prefers the most recent workspace transcript activity, which better matches real session switching behavior inside Claude Code / Cursor
+
+---
+
 ## [0.4.0] — 2026-04-22
 
 ### Added

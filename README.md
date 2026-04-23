@@ -61,6 +61,7 @@ This isn't a niche issue. In early March 2025, Anthropic quietly changed the def
 
 **Core:**
 - Finds the active Claude session for your current workspace
+- Follows same-project session switching more reliably by tracking the latest workspace transcript activity
 - Tracks TTL countdown based on your last prompt timestamp
 - Monitors cache health across recent turns
 - Analyzes your turn rhythm (median gap) and recommends the right mode — conservative on 5m suggestions, proactive on 1h suggestions
@@ -155,10 +156,10 @@ Automatically detects VS Code or Cursor and installs the latest version.
 
 ```bash
 # VS Code
-curl -L https://github.com/PurplePrintAI/save-ur-tokens-ttl-counter-for-claude-code/releases/latest/download/claude-ttl-counter-0.4.0.vsix -o /tmp/ttl.vsix && code --install-extension /tmp/ttl.vsix
+curl -L https://github.com/PurplePrintAI/save-ur-tokens-ttl-counter-for-claude-code/releases/latest/download/claude-ttl-counter-0.5.0.vsix -o /tmp/ttl.vsix && code --install-extension /tmp/ttl.vsix
 
 # Cursor
-curl -L https://github.com/PurplePrintAI/save-ur-tokens-ttl-counter-for-claude-code/releases/latest/download/claude-ttl-counter-0.4.0.vsix -o /tmp/ttl.vsix && cursor --install-extension /tmp/ttl.vsix
+curl -L https://github.com/PurplePrintAI/save-ur-tokens-ttl-counter-for-claude-code/releases/latest/download/claude-ttl-counter-0.5.0.vsix -o /tmp/ttl.vsix && cursor --install-extension /tmp/ttl.vsix
 ```
 
 ### Option 3: From IDE
