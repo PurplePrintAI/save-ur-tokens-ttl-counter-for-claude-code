@@ -1,5 +1,6 @@
 {
   "extension.displayName": "Claude TTL Counter",
-  "extension.description": "Shows Claude Code prompt cache TTL countdown and cache visibility.",
-  "command.toggleMode.title": "Claude TTL: Toggle cache mode"
+  "extension.description": "Live prompt-cache TTL countdown for Claude Code. Keeps the cache warm so TTL expiry doesn't burn your usage limit, and recommends 5m vs 1h from your real turn rhythm.",
+  "command.toggleMode.title": "Claude TTL: Toggle cache mode",
+  "command.installAdvisorSkill.title": "Claude TTL: Install /ttl-advisor skill (ask Claude)"
 }

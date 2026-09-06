@@ -4,13 +4,41 @@ All notable changes to Claude TTL Counter.
 
 ---
 
+## [0.6.0] — 2026-09-05
+
+### Changed
+
+- **Renamed: "Save ur tokens!" → "Save ur usage limit!"** — the extension never reduced the tokens you send. It keeps the prompt cache from expiring unnoticed, which prevents the full-context rebuild that burns your subscription's 5-hour / 7-day usage limit. README, tooltip, notifications, and the extension description now say that. GitHub repo renamed to `save-ur-usage-limit-ttl-counter-for-claude-code`; old URLs redirect
+- **Countdown anchor** — the TTL now counts from the start of the last API request (your prompt, or the last `tool_result` inside a turn) instead of the last user prompt. Anthropic measures the TTL from request start, and in a month of real transcripts 57% of agentic turns ran longer than 5 minutes, so the old anchor showed "expired" while tool calls were still refreshing the cache. Prompt-to-prompt median gap was 16 min; real idle gap median was 3.4 min
+- **Recommendation engine rewritten** — median-gap thresholds replaced by a counterfactual cost simulation (`src/recommendation.ts`): the last 30 turns are replayed under both TTLs with real request timestamps and cache read/write sizes, priced with Anthropic's multipliers (read 0.1×, write 1.25× for 5m / 2× for 1h, 0.025× reads on Claude Fable 5.1). Asymmetric confidence gates: `1h` needs ≥ 5 turns and ≥ 8% margin, `5m` needs ≥ 8 turns and ≥ 20% margin; ≥ 25% / ≥ 35% is "strong"
+- **Health warning** — only TTL-expiry cold starts while on `5m` trigger "resets look frequent". Model switches, compaction, and reloads are listed separately in the tooltip; the session-start cold start no longer counts
+- Tooltip copy: "may save tokens" → cost margin over the window; warning copy explains that a reset rebuilds the cache and burns usage limit
+
+### Added
+
+- **Observed cache tier** — reads `usage.cache_creation.ephemeral_5m_input_tokens` / `ephemeral_1h_input_tokens` from the transcript. The countdown uses the tier actually in effect (per-project overrides now count down correctly), and the tooltip prints "Observed cache TTL: 1h (settings say 5m)" on a mismatch
+- **Incremental transcript tracker** (`src/transcript-tracker.ts`) — remembers its byte offset and parses only appended lines each poll; re-reads on truncation; reconstructs logical turns, opening/closing calls, idle gaps, and cold-start kinds. No `vscode` dependency
+- **Rhythm in the tooltip** — idle-gap median / p75 over the last 30 turns, TTL-expiry rebuild count and tokens, and a "Mode check" line when you are already on the cheaper setting
+- **Strong-recommendation notification** — once per session, with **Switch to …** and **Ask Claude** buttons
+- **`/ttl-advisor` Claude Code skill** (`skills/ttl-advisor/SKILL.md`) + **`bridge/analyze-transcripts.js`** — a standalone analyzer (text or `--json`, `--all`, `--days`, `--window`, `--session`) that reports idle-gap percentiles, cold-start attribution, observed tier, always-on prefix size, and the 5m-vs-1h simulation per session / per project. The skill tells the user's own agent to run it, explain the result, ask about the next hour only when it matters, and offer to edit `settings.json`. Timestamps and token counts only; no prompt text
+- **Command** `Claude TTL: Install /ttl-advisor skill` and a third Quick Pick entry **Ask Claude why (/ttl-advisor)** — copies the analyzer and SKILL.md into `~/.claude/skills/ttl-advisor/`
+
+### Fixed
+
+- Cold starts were detected on the *closing* call of a turn (`stop_reason != tool_use`), which hides the rebuild in any multi-call turn; they are now detected on the opening call
+- Recommendation input mixed prompt spacing with turn duration; long turns no longer inflate the "gap"
+
+---
+
 ## [0.5.0] — 2026-04-23
 
 ### Fixed
+
 - **Same-project session switching sync** — when two Claude sessions are open in the same workspace, the counter now follows the session with the latest transcript activity instead of staying stuck on the previous session
 - **Active session selection** — workspace transcript candidates are now merged with `~/.claude/sessions/*.json` candidates, so switching between session A/B in the same project updates the counter to the correct session
 
 ### Changed
+
 - **Session detection priority** — active session resolution now prefers the most recent workspace transcript activity, which better matches real session switching behavior inside Claude Code / Cursor
 
 ---
@@ -18,6 +46,7 @@ All notable changes to Claude TTL Counter.
 ## [0.4.0] — 2026-04-22
 
 ### Added
+
 - **Rolling status bar feedback** — status bar cycles through 3 stages after each turn: `TTL countdown → turn usage flash → 5h/7d rate limit → countdown`
 - **Rate limit delta display** — shows per-turn usage increase: `5h 25.6% (+2.1%) | 7d 42.0% (+0.8%)`
 - **Statusline rate limit bridge** — `bridge/write-rate-limits.js` connects Claude Code's statusline output to the extension. Reads from `~/.claude/ttl-counter-rate-limits.json`
@@ -25,9 +54,11 @@ All notable changes to Claude TTL Counter.
 - **Warning priority** — warnings (frequent resets, expired) always override rolling feedback
 
 ### Changed
+
 - **Active session tracking** — sessions are now selected by `max(startedAt, transcriptLastWriteAt)` instead of `startedAt` alone. Sessions without transcripts are deprioritized. Fixes IDE reload creating throwaway sessions that hijack the counter
 
 ### Fixed
+
 - **Reload session hijack** — transcript-less sessions from Developer Reload Window no longer steal focus from the active session
 - **Stale rolling on wrong session** — rolling feedback only triggers for the correct active session's completed turns
 
@@ -36,6 +67,7 @@ All notable changes to Claude TTL Counter.
 ## [0.3.0] — 2026-04-21
 
 ### Added
+
 - **i18n support (Korean + English)** — tooltip, notification, Quick Pick, status bar now follow system language. Uses VS Code official `package.nls*.json` + `vscode.l10n.t()` pattern
 - **Median-based asymmetric recommendation** — replaced average gap with median gap. 5m suggestion only when median < 3min (conservative), 1h suggestion when > 5min (proactive), strong 1h when > 10min. Boundary zone (3–5min) shows no recommendation
 - **Strength-graded tooltip tips** — "5m may save tokens" / "1h is safer" / "strongly recommend 1h" instead of generic "switch to X"
@@ -43,6 +75,7 @@ All notable changes to Claude TTL Counter.
 - **Community evidence section** — Reddit + GeekNews links documenting Anthropic's silent TTL default change
 
 ### Changed
+
 - **Logical turn reconstruction** — assistant usage now deduped by requestId/messageId (same logical response no longer counts as multiple cold starts)
 - **User prompt filtering** — recommendation input excludes tool_result, meta messages, and interrupt placeholders
 - **Health warning separated from recommendation** — warning notification no longer appends mode suggestion
@@ -52,6 +85,7 @@ All notable changes to Claude TTL Counter.
 - **Maker bio updated** — product name removed (not yet public), founding builder context expanded
 
 ### Fixed
+
 - **False cold start on IDE reload** — multi-part assistant emission (thinking + text) no longer inflates cold start count
 - **False "frequent resets" warning** — grace period prevents warning from firing immediately after session switch
 
@@ -60,17 +94,20 @@ All notable changes to Claude TTL Counter.
 ## [0.2.0] — 2026-04-21
 
 ### Added
+
 - **Per-user context size guidance** — "Which TTL mode" section now explains why the answer varies per user (CLAUDE.md, MEMORY.md, MCP, plugins, harness docs affect cache reset cost)
 - **Decision rule** — short turn gaps → 5m saves daily usage; long turn gaps → 1h prevents mysterious limit drops
 - **Agentic coding tips** — practical lessons on turn cost, agent reading depth, and prompt quality
 - **Maker bio** — background story + PurplePrint System description + founding builder network
 
 ### Changed
+
 - **Repo renamed** to `save-ur-tokens-ttl-counter-for-claude-code` — value-first naming for discoverability
 - All internal repo references updated (install.js REPO constant, package.json URLs, README curl examples)
 - README restructured: Background story, cost note, Before/After, Core + UI table, per-project scope guide
 
 ### Fixed
+
 - npm installer now points to correct repo for GitHub Releases API
 
 ---
@@ -80,6 +117,7 @@ All notable changes to Claude TTL Counter.
 Initial public release.
 
 ### Features
+
 - **TTL countdown** in status bar — real-time display with 5-stage color (green → orange → warning → danger → expired)
 - **Cache health monitoring** — tracks cold starts across recent turns
 - **Usage tracking** — per-turn cache hit ratio, fresh tokens, total tokens in tooltip
@@ -88,10 +126,12 @@ Initial public release.
 - **Per-project TTL** — override global setting per workspace
 
 ### How it works
+
 - Reads local Claude files only (`~/.claude/sessions/`, `~/.claude/projects/`, `~/.claude/settings.json`)
 - Zero network calls, no proxy, no patching of Claude Code extension
 
 ### Docs
+
 - Full bilingual README (English + Korean)
 - HOW-TO-USE.md with detailed setup guide
 - Per-project TTL configuration guide

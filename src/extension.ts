@@ -1,11 +1,19 @@
 import * as vscode from 'vscode';
 
+import { installAdvisorSkill } from './advisor-skill';
 import { SettingsManager, TtlMode, getModeLabel } from './settings-manager';
-import { buildStatusPresentation, hasFrequentResetWarning, shouldPrioritizeWarning } from './status-model';
+import {
+  buildStatusPresentation,
+  getCacheAnchorAt,
+  hasFrequentResetWarning,
+  shouldPrioritizeWarning,
+} from './status-model';
 import { StatusBarController } from './status-bar';
 import { TtlSnapshot, TtlWatcher } from './ttl-watcher';
 
 const TOGGLE_MODE_COMMAND = 'claudeTtl.toggleMode';
+const INSTALL_ADVISOR_COMMAND = 'claudeTtl.installAdvisorSkill';
+const ADVISOR_SLASH_COMMAND = '/ttl-advisor';
 const ROLLING_STEP_MS = 3000;
 
 function getPrimaryWorkspacePath(): string | undefined {
@@ -13,11 +21,12 @@ function getPrimaryWorkspacePath(): string | undefined {
 }
 
 function getRemainingMs(snapshot: TtlSnapshot, now = Date.now()): number | undefined {
-  if (!snapshot.lastUserPromptAt) {
+  const anchor = getCacheAnchorAt(snapshot);
+  if (!anchor) {
     return undefined;
   }
 
-  return snapshot.ttlMs - (now - snapshot.lastUserPromptAt);
+  return snapshot.ttlMs - (now - anchor);
 }
 
 function formatRemainingText(remainingMs?: number): string {
@@ -46,6 +55,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   let soonNotifiedKey: string | undefined;
   let expiredNotifiedKey: string | undefined;
   let cacheWarningKey: string | undefined;
+  let recommendationNotifiedKey: string | undefined;
   let lastRolledTurnKey: string | undefined;
   let rollingTimer: NodeJS.Timeout | undefined;
 
@@ -78,7 +88,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
   const shouldSkipRolling = (snapshot: TtlSnapshot): boolean =>
     !snapshot.sessionId
-    || !snapshot.lastUserPromptAt
+    || !getCacheAnchorAt(snapshot)
     || shouldPrioritizeWarning(snapshot);
 
   const restoreCountdownAfterDelay = (): void => {
@@ -133,16 +143,90 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     scheduleRollingSequence();
   };
 
+  const installAdvisor = async (): Promise<void> => {
+    try {
+      const { skillDir } = await installAdvisorSkill(context.extensionPath);
+      const copyLabel = vscode.l10n.t('Copy /ttl-advisor');
+      const choice = await vscode.window.showInformationMessage(
+        vscode.l10n.t(
+          'Installed /ttl-advisor at {0}. In Claude Code, type /ttl-advisor for a personalized TTL recommendation.',
+          skillDir,
+        ),
+        copyLabel,
+      );
+
+      if (choice === copyLabel) {
+        await vscode.env.clipboard.writeText(ADVISOR_SLASH_COMMAND);
+      }
+    } catch (error) {
+      void vscode.window.showErrorMessage(
+        vscode.l10n.t('Failed to install /ttl-advisor skill: {0}', error instanceof Error ? error.message : String(error)),
+      );
+    }
+  };
+
+  const applyMode = async (mode: TtlMode): Promise<void> => {
+    await settingsManager.setMode(mode);
+    await watcher.refresh();
+    render();
+
+    void vscode.window.showInformationMessage(
+      vscode.l10n.t('TTL mode switched to {0}. Applies from your next prompt. If the previous cache already expired, the first turn may still trigger a rebuild.', getModeLabel(mode)),
+    );
+  };
+
+  const maybeNotifyRecommendation = (snapshot: TtlSnapshot): void => {
+    const recommendation = snapshot.recommendation;
+    if (
+      !recommendation
+      || !snapshot.sessionId
+      || snapshot.sessionGracePending
+      || recommendation.strength !== 'strong'
+      || recommendation.mode === snapshot.mode
+    ) {
+      return;
+    }
+
+    const key = `${snapshot.sessionId}:${recommendation.mode}`;
+    if (recommendationNotifiedKey === key) {
+      return;
+    }
+
+    recommendationNotifiedKey = key;
+
+    const recommendedMode = recommendation.mode;
+    const switchLabel = vscode.l10n.t('Switch to {0}', getModeLabel(recommendedMode));
+    const askLabel = vscode.l10n.t('Ask Claude');
+
+    void vscode.window.showInformationMessage(
+      vscode.l10n.t(
+        'Based on your last {0} turns, {1} would have cost about {2}% less. Switch now?',
+        recommendation.windowTurns,
+        getModeLabel(recommendedMode),
+        Math.round(recommendation.marginRatio * 100),
+      ),
+      switchLabel,
+      askLabel,
+    ).then(async (choice) => {
+      if (choice === switchLabel) {
+        await applyMode(recommendedMode);
+      } else if (choice === askLabel) {
+        await installAdvisor();
+      }
+    });
+  };
+
   const maybeNotify = (snapshot: TtlSnapshot): void => {
     const remainingMs = getRemainingMs(snapshot);
-    if (remainingMs === undefined || !snapshot.sessionId || !snapshot.lastUserPromptAt) {
+    const anchor = getCacheAnchorAt(snapshot);
+    if (remainingMs === undefined || !snapshot.sessionId || !anchor) {
       soonNotifiedKey = undefined;
       expiredNotifiedKey = undefined;
       cacheWarningKey = undefined;
       return;
     }
 
-    const notificationKey = `${snapshot.sessionId}:${snapshot.lastUserPromptAt}:${snapshot.mode}`;
+    const notificationKey = `${snapshot.sessionId}:${anchor}:${snapshot.mode}`;
 
     if (remainingMs <= 0) {
       if (expiredNotifiedKey !== notificationKey) {
@@ -161,17 +245,19 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       );
     }
 
+    maybeNotifyRecommendation(snapshot);
+
     const lastUsage = snapshot.lastCompletedTurn;
     if (!lastUsage?.timestamp) {
       return;
     }
 
-    const frequentResetKey = `${snapshot.sessionId}:${lastUsage.timestamp}:${snapshot.cacheHealth.recentColdStarts}`;
+    const frequentResetKey = `${snapshot.sessionId}:${lastUsage.timestamp}:${snapshot.cacheHealth.recentTtlExpiryColdStarts}`;
     if (hasFrequentResetWarning(snapshot) && cacheWarningKey !== frequentResetKey) {
       cacheWarningKey = frequentResetKey;
 
       void vscode.window.showWarningMessage(
-        vscode.l10n.t('Recent prompt cache resets look frequent. This can waste tokens by rebuilding fresh input.'),
+        vscode.l10n.t('Recent prompt cache resets look frequent. Each reset rebuilds the cache from scratch and burns your usage limit.'),
       );
     }
   };
@@ -201,7 +287,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     const snapshot = watcher.getSnapshot();
     const remainingText = formatRemainingText(getRemainingMs(snapshot));
 
-    const options: Array<vscode.QuickPickItem & { mode?: TtlMode }> = [
+    const options: Array<vscode.QuickPickItem & { mode?: TtlMode; action?: 'advisor' }> = [
       {
         label: buildModeOptionLabel('1h', currentMode === '1h'),
         description: currentMode === '1h'
@@ -216,24 +302,34 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
           : vscode.l10n.t('Switch'),
         mode: '5m',
       },
+      {
+        label: `$(sparkle) ${vscode.l10n.t('Ask Claude why (/ttl-advisor)')}`,
+        description: vscode.l10n.t('Install the /ttl-advisor skill and get a personalized explanation in Claude Code'),
+        action: 'advisor',
+      },
     ];
 
     const selected = await vscode.window.showQuickPick(options, {
       placeHolder: vscode.l10n.t('Claude TTL | {0} | {1}', getModeLabel(currentMode), remainingText),
     });
 
-    if (!selected?.mode || selected.mode === currentMode) {
+    if (!selected) {
       return;
     }
 
-    await settingsManager.setMode(selected.mode);
-    await watcher.refresh();
-    render();
+    if (selected.action === 'advisor') {
+      await installAdvisor();
+      return;
+    }
 
-    void vscode.window.showInformationMessage(
-      vscode.l10n.t('TTL mode switched to {0}. Applies from your next prompt. If the previous cache already expired, the first turn may still trigger a rebuild.', getModeLabel(selected.mode)),
-    );
+    if (!selected.mode || selected.mode === currentMode) {
+      return;
+    }
+
+    await applyMode(selected.mode);
   });
+
+  const installAdvisorDisposable = vscode.commands.registerCommand(INSTALL_ADVISOR_COMMAND, installAdvisor);
 
   const workspaceDisposable = vscode.workspace.onDidChangeWorkspaceFolders(() => {
     watcher.setWorkspacePath(getPrimaryWorkspacePath());
@@ -246,6 +342,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
   context.subscriptions.push(
     toggleModeDisposable,
+    installAdvisorDisposable,
     workspaceDisposable,
     {
       dispose: () => clearInterval(renderInterval),

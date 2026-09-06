@@ -10,6 +10,7 @@
 - [When to use 5m vs 1h](#when-to-use-5m-vs-1h)
 - [Practical scenarios](#practical-scenarios)
 - [How to react to warnings](#how-to-react-to-warnings)
+- [Ask Claude: /ttl-advisor](#ask-claude-ttl-advisor)
 - [Per-project TTL](#per-project-ttl)
 - [Rolling status bar](#rolling-status-bar)
 - [Statusline bridge](#statusline-bridge)
@@ -32,16 +33,17 @@ This extension is most useful when you want to answer a simple question before s
 TTL 42:15 · my-workspace
 ```
 
-Time remaining until cache expires. The project name helps you tell windows apart.
+Time remaining until cache expires, counted from the **start of the last API request** — your prompt, or the last tool call inside the turn. While the agent is working, every tool call refreshes the cache, so the countdown restarts as the turn progresses. The project name helps you tell windows apart.
 
 ### 2. Tooltip
 
-Hover over the status bar to see the last turn's cache stats:
+Hover over the status bar to see:
 
-- Total input tokens
-- Cache hit ratio — higher is better
-- Fresh (non-cached) tokens — lower means more savings
-- Cache health (whether cold starts occurred)
+- Mode, and *Observed cache TTL* when the transcript shows a different tier than `settings.json` (a per-project override, for example)
+- Last turn: total input tokens, cache hit ratio (higher is better), fresh tokens (lower means more savings)
+- Health: TTL-expiry resets in the last 5 turns, plus other cold starts (model switch, compaction, reload) listed separately
+- Rhythm: idle gap median and p75 over the last 30 turns, and how many tokens TTL-expiry rebuilds cost
+- The recommendation: *"Tip: 1h mode would have cost about 27% less over your last 30 turns"*, or *"Mode check"* when you're already on the cheaper setting
 
 ---
 
@@ -106,10 +108,34 @@ Cache is still alive but expiring soon.
 
 ### "Recent cache resets look frequent"
 
-Multiple cold starts in recent turns. Fresh token cost is piling up.
+Two or more TTL-expiry cold starts in the last 5 turns while on `5m`. Each one rebuilt your whole context and burned usage limit.
 
-- Check if your turn gaps are genuinely long
-- If so, consider `1h` mode
+- Check the tooltip's *Rhythm* line: if idle gaps sit between 5 and 60 minutes, switch to `1h`
+- Cold starts caused by a model switch, compaction, or an IDE reload are listed separately; changing the TTL won't fix those
+
+### "1h mode would have cost about 27% less. Switch now?"
+
+The recommendation engine replayed your last 30 turns under both TTLs and found a strong margin. It shows once per session.
+
+- **Switch to …** applies the setting immediately (takes effect from your next prompt)
+- **Ask Claude** installs the `/ttl-advisor` skill so your agent can explain it
+- Dismiss it if you know the next hour will look different from the last one
+
+---
+
+## Ask Claude: /ttl-advisor
+
+Click the status bar → **Ask Claude why (/ttl-advisor)**, or run *Claude TTL: Install /ttl-advisor skill* from the command palette. This copies `analyze-transcripts.js` and a `SKILL.md` into `~/.claude/skills/ttl-advisor/`. Then type `/ttl-advisor` in Claude Code.
+
+The agent runs the analyzer, reads the JSON (timestamps and token counts only), explains your rhythm and the cost comparison, asks about the next hour only when that would change the answer, and offers to edit `settings.json`.
+
+Run it yourself:
+
+```bash
+node ~/.claude/skills/ttl-advisor/analyze-transcripts.js                 # this project, last 30 days
+node ~/.claude/skills/ttl-advisor/analyze-transcripts.js --all --days 14 # every project
+node ~/.claude/skills/ttl-advisor/analyze-transcripts.js --json          # for scripts / agents
+```
 
 ---
 
@@ -156,7 +182,7 @@ Claude Code checks project-level settings first, then falls back to global.
   normal-repo/             ← follows global setting
 ```
 
-Note: The status bar toggle only changes the global setting. If a project-level override exists, the toggle won't affect that project.
+Note: The status bar toggle only changes the global setting. If a project-level override exists, the toggle won't affect that project — but the countdown still uses the tier the transcript shows in effect, and the tooltip prints *Observed cache TTL* so you can see the override working.
 
 ---
 

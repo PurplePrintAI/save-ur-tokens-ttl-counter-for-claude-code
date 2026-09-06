@@ -29,12 +29,17 @@ const rateLimitPercentFormatter = new Intl.NumberFormat(locale, {
   maximumFractionDigits: 1,
 });
 
+export function getCacheAnchorAt(snapshot: TtlSnapshot): number | undefined {
+  return snapshot.cacheAnchorAt ?? snapshot.lastUserPromptAt;
+}
+
 function getRemainingMs(snapshot: TtlSnapshot, now = Date.now()): number | undefined {
-  if (!snapshot.lastUserPromptAt) {
+  const anchor = getCacheAnchorAt(snapshot);
+  if (!anchor) {
     return undefined;
   }
 
-  return snapshot.ttlMs - (now - snapshot.lastUserPromptAt);
+  return snapshot.ttlMs - (now - anchor);
 }
 
 function formatRemaining(remainingMs: number): string {
@@ -42,6 +47,28 @@ function formatRemaining(remainingMs: number): string {
   const minutes = Math.floor(totalSeconds / 60);
   const seconds = totalSeconds % 60;
   return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+}
+
+export function formatDurationShort(ms?: number): string {
+  if (ms === undefined || !Number.isFinite(ms)) {
+    return '--';
+  }
+
+  const seconds = ms / 1000;
+  if (seconds < 60) {
+    return `${Math.round(seconds)}s`;
+  }
+
+  const minutes = seconds / 60;
+  if (minutes < 10) {
+    return `${compactNumberFormatter.format(minutes)}m`;
+  }
+
+  if (minutes < 60) {
+    return `${Math.round(minutes)}m`;
+  }
+
+  return `${compactNumberFormatter.format(minutes / 60)}h`;
 }
 
 function projectName(workspacePath?: string): string {
@@ -161,10 +188,98 @@ function buildRateLimitFlash(snapshot: TtlSnapshot): string | undefined {
   return undefined;
 }
 
+function buildHealthLines(snapshot: TtlSnapshot): string[] {
+  const turns = snapshot.sessionGracePending
+    ? snapshot.logicalTurnsSinceSessionSwitch
+    : snapshot.cacheHealth.recentTurns;
+  const ttlResets = snapshot.sessionGracePending ? 0 : snapshot.cacheHealth.recentTtlExpiryColdStarts;
+  const otherResets = snapshot.sessionGracePending ? 0 : snapshot.cacheHealth.recentOtherColdStarts;
+
+  const lines = [
+    ttlResets > 0
+      ? ttlResets > 1
+        ? vscode.l10n.t('Health: {0} TTL-expiry resets in last {1} turns', ttlResets, turns)
+        : vscode.l10n.t('Health: {0} TTL-expiry reset in last {1} turns', ttlResets, turns)
+      : vscode.l10n.t('Health: stable ({0} turns)', turns),
+  ];
+
+  if (otherResets > 0) {
+    lines.push(vscode.l10n.t('Other cold starts (model switch, compaction, reload): {0}', otherResets));
+  }
+
+  return lines;
+}
+
+function buildRhythmLines(snapshot: TtlSnapshot): string[] {
+  const rhythm = snapshot.rhythm;
+  if (!rhythm || rhythm.turns < 2 || rhythm.idleMedianMs === undefined) {
+    return [];
+  }
+
+  const lines = [
+    vscode.l10n.t(
+      'Rhythm: idle gap median {0} | p75 {1} (last {2} turns)',
+      formatDurationShort(rhythm.idleMedianMs),
+      formatDurationShort(rhythm.idleP75Ms),
+      rhythm.turns,
+    ),
+  ];
+
+  if (rhythm.ttlExpiryColdStarts > 0) {
+    lines.push(vscode.l10n.t(
+      'TTL-expiry rebuilds: {0} turns | {1} tokens (last {2} turns)',
+      rhythm.ttlExpiryColdStarts,
+      formatCompactTokens(rhythm.ttlExpiryRebuildTokens),
+      rhythm.turns,
+    ));
+  }
+
+  return lines;
+}
+
+/** Builds the tooltip line for the recommendation. `undefined` when there is nothing to say. */
+export function buildRecommendationLine(snapshot: TtlSnapshot): string | undefined {
+  const recommendation = snapshot.recommendation;
+  if (!recommendation) {
+    return undefined;
+  }
+
+  const marginPercent = Math.round(recommendation.marginRatio * 100);
+  const recommendedLabel = getModeLabel(recommendation.mode);
+  const otherLabel = getModeLabel(recommendation.mode === '1h' ? '5m' : '1h');
+
+  if (recommendation.mode === snapshot.mode) {
+    return vscode.l10n.t(
+      'Mode check: {0} is the cheaper choice (about {1}% vs {2}, last {3} turns).',
+      recommendedLabel,
+      marginPercent,
+      otherLabel,
+      recommendation.windowTurns,
+    );
+  }
+
+  if (recommendation.strength === 'strong') {
+    return vscode.l10n.t(
+      'Tip: strongly recommend {0} (about {1}% less over your last {2} turns).',
+      recommendedLabel,
+      marginPercent,
+      recommendation.windowTurns,
+    );
+  }
+
+  return vscode.l10n.t(
+    'Tip: {0} would have cost about {1}% less over your last {2} turns.',
+    recommendedLabel,
+    marginPercent,
+    recommendation.windowTurns,
+  );
+}
+
 export function hasFrequentResetWarning(snapshot: TtlSnapshot): boolean {
   return !snapshot.sessionGracePending
+    && snapshot.mode === '5m'
     && snapshot.logicalTurnsSinceSessionSwitch >= 2
-    && snapshot.cacheHealth.recentColdStarts >= 2;
+    && snapshot.cacheHealth.recentTtlExpiryColdStarts >= 2;
 }
 
 export function shouldPrioritizeWarning(snapshot: TtlSnapshot, now = Date.now()): boolean {
@@ -190,11 +305,22 @@ export function buildStatusPresentation(snapshot: TtlSnapshot, now = Date.now())
     vscode.l10n.t('Claude TTL Counter'),
     '',
     vscode.l10n.t('Mode: {0}', modeLabel),
-    vscode.l10n.t('Workspace: {0}', project || vscode.l10n.t('none')),
-    vscode.l10n.t('Session: {0}', session),
   ];
 
-  if (!snapshot.lastUserPromptAt) {
+  if (snapshot.observedTier && snapshot.observedTier !== snapshot.configuredMode) {
+    tooltipLines.push(vscode.l10n.t(
+      'Observed cache TTL: {0} (settings say {1})',
+      getModeLabel(snapshot.observedTier),
+      getModeLabel(snapshot.configuredMode),
+    ));
+  }
+
+  tooltipLines.push(
+    vscode.l10n.t('Workspace: {0}', project || vscode.l10n.t('none')),
+    vscode.l10n.t('Session: {0}', session),
+  );
+
+  if (!getCacheAnchorAt(snapshot)) {
     return {
       text: `$(clock) ${vscode.l10n.t('TTL --:--')}${projectSuffix}`,
       tooltip: [
@@ -209,23 +335,8 @@ export function buildStatusPresentation(snapshot: TtlSnapshot, now = Date.now())
   const expired = remainingMs <= 0;
   const timeText = expired ? vscode.l10n.t('expired') : formatRemaining(remainingMs);
   const remainingRatio = expired ? 0 : remainingMs / snapshot.ttlMs;
-  const healthTurns = snapshot.sessionGracePending
-    ? snapshot.logicalTurnsSinceSessionSwitch
-    : snapshot.cacheHealth.recentTurns;
-  const healthColdStarts = snapshot.sessionGracePending
-    ? 0
-    : snapshot.cacheHealth.recentColdStarts;
 
-  const healthSummary = healthColdStarts > 0
-    ? healthColdStarts > 1
-      ? vscode.l10n.t('Health: {0} cold starts in last {1} turns', healthColdStarts, healthTurns)
-      : vscode.l10n.t('Health: {0} cold start in last {1} turns', healthColdStarts, healthTurns)
-    : vscode.l10n.t('Health: stable ({0} turns)', healthTurns);
-
-  const recommendationLine = snapshot.recommendation && snapshot.recommendation.mode !== snapshot.mode
-    ? vscode.l10n.t(snapshot.recommendation.reason)
-    : undefined;
-
+  const recommendationLine = buildRecommendationLine(snapshot);
   const awaitingLine = snapshot.awaitingAssistantTurn
     ? vscode.l10n.t('Generating...')
     : undefined;
@@ -258,10 +369,12 @@ export function buildStatusPresentation(snapshot: TtlSnapshot, now = Date.now())
       vscode.l10n.t('TTL: {0}', timeText),
       '',
       ...buildUsageLines(snapshot.lastCompletedTurn),
-      healthSummary,
+      ...buildHealthLines(snapshot),
+      ...buildRhythmLines(snapshot),
       ...buildRateLimitTooltipLines(snapshot),
       ...(awaitingLine ? [awaitingLine] : []),
       ...(recommendationLine ? ['', recommendationLine] : []),
+      vscode.l10n.t('Ask Claude: run /ttl-advisor in Claude Code for a personalized explanation.'),
     ].join('\n'),
     visualState,
     remainingRatio,

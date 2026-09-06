@@ -1,5 +1,6 @@
 {
   "extension.displayName": "Claude TTL 카운터",
-  "extension.description": "Claude Code 프롬프트 캐시 TTL 남은 시간과 캐시 상태를 보여줘요.",
-  "command.toggleMode.title": "Claude TTL: 캐시 모드 바꾸기"
+  "extension.description": "Claude Code 프롬프트 캐시 TTL 카운트다운. 캐시 만료로 사용량 한도가 새는 걸 막고, 실제 턴 리듬으로 5분/1시간 모드를 추천해요.",
+  "command.toggleMode.title": "Claude TTL: 캐시 모드 바꾸기",
+  "command.installAdvisorSkill.title": "Claude TTL: /ttl-advisor 스킬 설치 (Claude에게 물어보기)"
 }

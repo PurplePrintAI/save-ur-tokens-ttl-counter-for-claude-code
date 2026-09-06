@@ -1,16 +1,21 @@
-# Save ur tokens! — Claude TTL Counter
+# Save ur usage limit! — Claude TTL Counter
 
 > English | **[한국어](./README.ko.md)**
 
-**"I barely used it today, but my daily limit is already gone."** *(Claude Code has a 5-hour rolling usage limit — in practice, it feels like a daily limit.)* If that sounds familiar, it's probably not the model — it's an invisible cache setting that doesn't match how you actually work. Claude Code has a prompt cache that reuses previous context, but the default time-to-live (TTL) for that cache is set to just **5 minutes** (this was [silently changed](https://www.reddit.com/r/ClaudeCode/comments/1sk3iyq/followup_anthropic_quietly_switched_the_default/) recently). That means if more than 5 minutes pass after your last prompt, all the cached context in your session resets — and the next turn has to rebuild it from scratch. The more context you've accumulated (conversation history, files read, tool calls), the bigger the rebuild cost. That's why your daily usage can suddenly spike even though you barely sent anything — it's not you using more, it's the cache silently resetting and rebuilding everything.
+> Keep the prompt cache warm, so a TTL expiry doesn't rebuild your whole context and eat your 5-hour / weekly usage limit.
+
+> **Renamed from "Save ur tokens!"** — the old name was slightly wrong. This extension doesn't reduce the tokens you send. It stops the cache TTL from expiring unnoticed, and with it the full cache rebuild that burns your *subscription usage limit*. Same tool, more honest name. (The GitHub repo was renamed too; old links redirect.)
+
+**"I barely used it today, but my daily limit is already gone."** *(Claude Code has a 5-hour rolling usage limit — in practice, it feels like a daily limit.)* If that sounds familiar, it's probably not the model — it's an invisible cache setting that doesn't match how you actually work. Claude Code has a prompt cache that reuses previous context, but the default time-to-live (TTL) for that cache is set to just **5 minutes** (this was [silently changed](https://www.reddit.com/r/ClaudeCode/comments/1sk3iyq/followup_anthropic_quietly_switched_the_default/) recently). That means if more than 5 minutes pass after the last request in your session (your prompt, or the last tool call inside a turn), all the cached context resets — and the next request has to rebuild it from scratch at the cache-write price. The more context you've accumulated (conversation history, files read, tool calls), the bigger the rebuild. That's why your usage limit can suddenly drop even though you barely sent anything — it's not you using more, it's the cache silently expiring and being rebuilt.
 
 > **TL;DR — which setting is right for you?**
-> - **Turn gaps usually < 5 min** → stay on `5m` (default). Cache stays warm. Cheaper per-token rate. Daily usage stays steady.
-> - **Turn gaps often > 5 min** → switch to `1h`. Otherwise the cache silently resets between turns and your daily limit drops fast without you knowing why.
+> - **Idle gaps between turns usually < 5 min** → stay on `5m` (default). Cheaper cache writes, and the cache stays warm on its own.
+> - **Idle gaps often 5–60 min** → switch to `1h`. Otherwise the cache silently resets between turns and your limit drops fast without you knowing why.
+> - **Not sure?** Hover the status bar: the extension replays your recent turns under both settings and tells you which one would have cost less. Or run `/ttl-advisor` in Claude Code and let your own agent explain it.
 
-**This extension shows a live countdown of your cache timer right in the status bar — so you always know how much time you have.** No more wondering "has it expired yet?" while you're reading code or thinking about your next prompt. It also watches your work rhythm and recommends the right cache setting for you. Follow the recommendation, change one setting, and stop losing tokens to resets you didn't even know were happening.
+**This extension shows a live countdown of your cache timer right in the status bar — so you always know how much time you have.** No more wondering "has it expired yet?" while you're reading code or thinking about your next prompt. It also replays your real turn history under both TTL settings and recommends the cheaper one. Follow the recommendation, change one setting, and stop losing usage limit to resets you didn't even know were happening.
 
-I built this because I kept hitting the daily limit without understanding why. After switching to the right cache setting and using this counter, cache resets went from 5–6 times a day down to 1–2. I stopped rushing my prompts, started reading agent output carefully, and got better results with fewer turns. I hope this helps you waste fewer tokens, worry less, and enjoy working with your agent a little more.
+I built this because I kept hitting the daily limit without understanding why. After switching to the right cache setting and using this counter, cache resets went from 5–6 times a day down to 1–2. I stopped rushing my prompts, started reading agent output carefully, and got better results with fewer turns. I hope this helps you waste less of your usage limit, worry less, and enjoy working with your agent a little more.
 
 ---
 
@@ -20,9 +25,11 @@ I built this because I kept hitting the daily limit without understanding why. A
 - [Important note on cost](#important-note-on-cost)
 - [What it does](#what-it-does)
 - [How it works](#how-it-works)
+- [How the recommendation works](#how-the-recommendation-works)
 - [Which TTL mode?](#which-ttl-mode-should-you-use)
 - [Install](#install)
 - [Quick start](#quick-start)
+- [Ask your own agent: /ttl-advisor](#ask-your-own-agent-ttl-advisor)
 - [Privacy](#privacy)
 - [Tips for agentic coding](#tips-for-agentic-coding)
 - [Made by](#made-by)
@@ -62,9 +69,11 @@ This isn't a niche issue. In early March 2025, Anthropic quietly changed the def
 **Core:**
 - Finds the active Claude session for your current workspace
 - Follows same-project session switching more reliably by tracking the latest workspace transcript activity
-- Tracks TTL countdown based on your last prompt timestamp
-- Monitors cache health across recent turns
-- Analyzes your turn rhythm (median gap) and recommends the right mode — conservative on 5m suggestions, proactive on 1h suggestions
+- Tracks the TTL countdown from the **start of the last API request** (your prompt, or the last tool call inside a turn). Anthropic measures the TTL from there, so long agentic turns no longer show a false "expired"
+- Reads the cache tier **actually used** by each request (`usage.cache_creation.ephemeral_5m / ephemeral_1h`), so the countdown is right even with a per-project override, and the tooltip flags a mismatch with `settings.json`
+- Classifies cold starts on the opening call of each turn: session start / TTL expiry / other (model switch, compaction, reload)
+- **Counterfactual recommendation**: replays your last 30 turns under both TTLs with real timestamps and token counts, and recommends the cheaper one with the margin (e.g. "1h would have cost about 27% less")
+- **`/ttl-advisor`**: one click installs a Claude Code skill so your own agent runs the analyzer and explains the recommendation in context
 - **Rolling status bar feedback** after each turn: `TTL → turn usage → 5h/7d rate limit → TTL`
 
 **What you see:**
@@ -74,19 +83,42 @@ This isn't a niche issue. In early March 2025, Anthropic quietly changed the def
 | **Status bar** | `$(clock) TTL 42:15 · my-project` | Default: live countdown + project name. 5-stage color |
 | **Turn usage flash** | `$(pulse) 84k in · hit 82% · 1.3k out` | 3s after turn completes. Distinct background color |
 | **Rate limit flash** | `$(dashboard) 5h 25.6% (+2.1%) · 7d 42.0%` | Cumulative usage + per-turn delta. Bridge required |
-| **Tooltip** (hover) | `Last turn: 39,685 tokens` | Cache hit ratio, fresh tokens, health summary |
-| **Quick Pick** (click) | `$(check) 1h mode · Current · 42:15` | Click to switch between 5m and 1h |
-| **Notification** | `"Cache resets look frequent..."` | Warning when cold starts >= 2 (separate from recommendation) |
+| **Tooltip** (hover) | `Rhythm: idle gap median 3.4m · p75 16m` | Cache hit ratio, health, observed tier, TTL-expiry rebuilds, recommendation with margin |
+| **Quick Pick** (click) | `$(check) 1h mode · Current · 42:15` | Switch between 5m and 1h, or **Ask Claude why (/ttl-advisor)** |
+| **Notification** | `"1h would have cost about 27% less. Switch now?"` | Once per session on a strong recommendation, with **Switch** / **Ask Claude** buttons. A separate warning fires when TTL-expiry resets pile up on 5m |
 
-> **"Why don't I see 5h/7d usage?"** The 5h/7d rate limit display is not yet automatically available. The extension can show it if rate limit data is written to `~/.claude/ttl-counter-rate-limits.json`, but there's currently no automatic way to populate this file from within the VS Code extension environment. We're [researching solutions](https://github.com/PurplePrintAI/save-ur-tokens-ttl-counter-for-claude-code/issues/1). For now, the rolling sequence is `TTL → turn usage → TTL`.
+> **"Why don't I see 5h/7d usage?"** The 5h/7d rate limit display is not yet automatically available. The extension can show it if rate limit data is written to `~/.claude/ttl-counter-rate-limits.json`, but there's currently no automatic way to populate this file from within the VS Code extension environment. We're [researching solutions](https://github.com/PurplePrintAI/save-ur-usage-limit-ttl-counter-for-claude-code/issues/1). For now, the rolling sequence is `TTL → turn usage → TTL`.
 
 ## How it works
 
 This extension does **not** patch the Claude Code extension and does **not** proxy Claude requests. Instead, it reads local Claude files:
 
 - `~/.claude/sessions/*.json` — active session detection
-- `~/.claude/projects/**/<sessionId>.jsonl` — last user timestamp + cache usage
+- `~/.claude/projects/**/<sessionId>.jsonl` — request timestamps, cache usage, and the cache tier per request (read incrementally: only lines appended since the last poll are parsed)
 - `~/.claude/settings.json` — TTL mode read/write
+- `~/.claude/skills/ttl-advisor/` — written only when you install the `/ttl-advisor` skill
+
+## How the recommendation works
+
+Earlier versions thresholded the median gap between your prompts. Analyzing a month of real transcripts showed two problems with that:
+
+1. **Prompt-to-prompt gaps overstate idle time.** Agentic turns are long — in that data the median turn ran 6.6 minutes and 57% ran longer than 5 minutes. Every tool call inside a turn refreshes the cache, so what the TTL actually sees is the gap between the *last request of a turn* and the *next prompt*. Median prompt gap: 16 minutes. Median idle gap: 3.4 minutes.
+2. **A median hides mixed rhythms.** Many sessions alternate 1–3 minute bursts with 15–90 minute reading gaps. One number can't price that trade-off.
+
+v0.6 replaces the threshold with a **counterfactual cost simulation** (`src/recommendation.ts`):
+
+- Take the API calls of your last 30 turns: real request timestamps, real `cache_read` / `cache_creation` sizes, model.
+- Replay them under `5m` and under `1h`. A call whose gap from the previous request exceeds the TTL rebuilds the whole context at the cache-write price; otherwise it reads from cache.
+- Price it with Anthropic's published multipliers relative to base input: cache read 0.1× (0.025× on Claude Fable 5.1), cache write 1.25× on `5m` or 2× on `1h`.
+- Recommend the cheaper policy only when the margin is large enough for the sample: `1h` needs ≥ 5 turns and ≥ 8% margin; `5m` needs ≥ 8 turns and ≥ 20% margin, because a wrong `5m` call costs far more than a wrong `1h` call. ≥ 25% / ≥ 35% counts as "strong" and also triggers a one-time notification with a Switch button.
+
+The tooltip shows the result as *"Tip: 1h mode would have cost about 27% less over your last 30 turns"* — or *"Mode check: 1h mode is the cheaper choice"* when you're already on the right one.
+
+The same engine runs standalone in `bridge/analyze-transcripts.js` over any number of days or projects, and the `/ttl-advisor` skill hands its JSON to your own agent so it can add what the data can't know — what you're about to do next.
+
+**Assumption to keep in mind**: subscription usage limits are assumed to be weighted like API pricing. Treat absolute numbers as estimates; the *comparison* between the two policies is the signal.
+
+For reference, one heavy user's month (207 sessions, 1,800 turns, contexts around 460k tokens): `1h` was about 27% cheaper overall, every long design session preferred `1h`, and only tiny one-shot sessions preferred `5m`. Yours will differ — that's the point of measuring instead of guessing. Feedback on the engine is collected in [Issue #1](https://github.com/PurplePrintAI/save-ur-usage-limit-ttl-counter-for-claude-code/issues/1).
 
 ## Which TTL mode should you use?
 
@@ -156,10 +188,10 @@ Automatically detects VS Code or Cursor and installs the latest version.
 
 ```bash
 # VS Code
-curl -L https://github.com/PurplePrintAI/save-ur-tokens-ttl-counter-for-claude-code/releases/latest/download/claude-ttl-counter-0.5.0.vsix -o /tmp/ttl.vsix && code --install-extension /tmp/ttl.vsix
+curl -L https://github.com/PurplePrintAI/save-ur-usage-limit-ttl-counter-for-claude-code/releases/latest/download/claude-ttl-counter-0.6.0.vsix -o /tmp/ttl.vsix && code --install-extension /tmp/ttl.vsix
 
 # Cursor
-curl -L https://github.com/PurplePrintAI/save-ur-tokens-ttl-counter-for-claude-code/releases/latest/download/claude-ttl-counter-0.5.0.vsix -o /tmp/ttl.vsix && cursor --install-extension /tmp/ttl.vsix
+curl -L https://github.com/PurplePrintAI/save-ur-usage-limit-ttl-counter-for-claude-code/releases/latest/download/claude-ttl-counter-0.6.0.vsix -o /tmp/ttl.vsix && cursor --install-extension /tmp/ttl.vsix
 ```
 
 ### Option 3: From IDE
@@ -176,18 +208,36 @@ curl -L https://github.com/PurplePrintAI/save-ur-tokens-ttl-counter-for-claude-c
 
 For a detailed guide, see [HOW-TO-USE.md](./HOW-TO-USE.md).
 
+## Ask your own agent: /ttl-advisor
+
+The status bar can tell you *which* setting is cheaper. Your agent can tell you *why*, in the context of what you're doing. Click the status bar → **Ask Claude why (/ttl-advisor)**, or run the command *Claude TTL: Install /ttl-advisor skill*. That copies a small analyzer plus a `SKILL.md` into `~/.claude/skills/ttl-advisor/`. Then, in Claude Code:
+
+```text
+/ttl-advisor
+```
+
+Your agent runs the analyzer (timestamps and token counts only — it never reads prompt text), explains your idle-gap distribution and how many rebuilds each TTL would have caused, asks what the next hour looks like when that would change the answer, and offers to edit `settings.json` for you — globally or just for this project.
+
+You can also run the analyzer yourself:
+
+```bash
+node ~/.claude/skills/ttl-advisor/analyze-transcripts.js            # this project, last 30 days
+node ~/.claude/skills/ttl-advisor/analyze-transcripts.js --all --json
+```
+
 ## Privacy
 
 - Reads only local Claude files on your machine
 - Does not proxy or intercept Claude requests
 - Does not upload data anywhere
 - Zero network calls
+- The `/ttl-advisor` analyzer reads timestamps and token counts only; its report contains no prompt text
 
 ## Development
 
-Contributions and forks are welcome. This is a small, focused project — the core logic is in five TypeScript files.
+Contributions and forks are welcome. This is a small, focused project — the core logic is in seven TypeScript files. `src/transcript-tracker.ts` and `src/recommendation.ts` have no `vscode` dependency, so you can exercise them with plain node.
 
-**Help improve the recommendation logic**: The mode recommendation engine uses a median-based asymmetric matrix to suggest 5m or 1h mode based on your turn rhythm. We've documented exactly how it works and are collecting real-world feedback — see **[Issue #1: RFC — Recommendation logic](https://github.com/PurplePrintAI/save-ur-tokens-ttl-counter-for-claude-code/issues/1)**.
+**Help improve the recommendation logic**: The engine is a counterfactual cost simulation (see [How the recommendation works](#how-the-recommendation-works)). Run `node bridge/analyze-transcripts.js --all` on your own machine and tell us whether the verdict matches your experience — see **[Issue #1: RFC — Recommendation logic](https://github.com/PurplePrintAI/save-ur-usage-limit-ttl-counter-for-claude-code/issues/1)**.
 
 ```bash
 npm install        # install dependencies

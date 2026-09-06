@@ -2,12 +2,12 @@
   "name": "claude-ttl-counter",
   "displayName": "%extension.displayName%",
   "description": "%extension.description%",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "publisher": "purpleprintai",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/PurplePrintAI/save-ur-tokens-ttl-counter-for-claude-code"
+    "url": "https://github.com/PurplePrintAI/save-ur-usage-limit-ttl-counter-for-claude-code"
   },
   "engines": {
     "vscode": "^1.99.0"
@@ -21,7 +21,7 @@
     "ttl",
     "prompt-cache",
     "cache",
-    "token"
+    "usage-limit"
   ],
   "activationEvents": [
     "onStartupFinished"
@@ -33,6 +33,10 @@
       {
         "command": "claudeTtl.toggleMode",
         "title": "%command.toggleMode.title%"
+      },
+      {
+        "command": "claudeTtl.installAdvisorSkill",
+        "title": "%command.installAdvisorSkill.title%"
       }
     ]
   },

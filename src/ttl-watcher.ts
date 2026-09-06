@@ -3,7 +3,15 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 
 import { RateLimitSummary, readRateLimitSummary } from './rate-limit-bridge';
+import {
+  ModeRecommendation,
+  RECOMMENDATION_WINDOW_TURNS,
+  RhythmSummary,
+  buildRecommendation,
+  summarizeRhythm,
+} from './recommendation';
 import { SettingsManager, TtlMode, getTtlDurationMs } from './settings-manager';
+import { ApiCall, TranscriptState, TranscriptTracker } from './transcript-tracker';
 
 interface ClaudeSessionFile {
   sessionId?: string;
@@ -15,38 +23,6 @@ interface ResolvedClaudeSession extends ClaudeSessionFile {
   transcriptPath?: string;
   transcriptLastWriteAt?: number;
   activityAt?: number;
-}
-
-interface TranscriptUsagePayload {
-  input_tokens?: unknown;
-  cache_read_input_tokens?: unknown;
-  cache_creation_input_tokens?: unknown;
-  output_tokens?: unknown;
-}
-
-interface TranscriptContentItem {
-  type?: string;
-  text?: string;
-}
-
-interface TranscriptLine {
-  requestId?: string;
-  type?: string;
-  timestamp?: string;
-  isMeta?: boolean;
-  message?: {
-    id?: string;
-    content?: TranscriptContentItem[];
-    usage?: TranscriptUsagePayload;
-    stop_reason?: string;
-  };
-}
-
-interface AssistantTurnCandidate {
-  requestId?: string;
-  messageId?: string;
-  tokenTuple: string;
-  usage: TurnUsageSummary;
 }
 
 export interface TurnUsageSummary {
@@ -62,14 +38,14 @@ export interface TurnUsageSummary {
 
 export interface CacheHealthSummary {
   recentTurns: number;
+  /** Cold starts excluding the expected one at session start. */
   recentColdStarts: number;
+  recentTtlExpiryColdStarts: number;
+  recentOtherColdStarts: number;
   recentLowHitTurns: number;
 }
 
-export interface ModeRecommendation {
-  mode: TtlMode;
-  reason: string;
-}
+export type { ModeRecommendation, RhythmSummary } from './recommendation';
 
 export type RollingState = 'countdown' | 'turn_usage' | 'rate_limit';
 
@@ -80,15 +56,23 @@ export interface RateLimitDelta {
 
 export interface TtlSnapshot {
   workspacePath?: string;
+  /** Effective tier used for the countdown: observed from the transcript when available. */
   mode: TtlMode;
+  /** Tier configured in ~/.claude/settings.json. */
+  configuredMode: TtlMode;
+  /** Tier actually used by the most recent cache write in the transcript. */
+  observedTier?: TtlMode;
   ttlMs: number;
   sessionId?: string;
   transcriptPath?: string;
   lastUserPromptAt?: number;
+  /** Start of the most recent API request; the cache TTL counts from here. */
+  cacheAnchorAt?: number;
   lastCompletedTurn?: TurnUsageSummary;
   rateLimits?: RateLimitSummary;
   rateLimitDelta?: RateLimitDelta;
   cacheHealth: CacheHealthSummary;
+  rhythm?: RhythmSummary;
   sessionGracePending: boolean;
   logicalTurnsSinceSessionSwitch: number;
   recommendation?: ModeRecommendation;
@@ -100,23 +84,26 @@ export interface TtlSnapshot {
 
 interface TranscriptSignals {
   lastUserPromptAt?: number;
+  cacheAnchorAt?: number;
   lastCompletedTurn?: TurnUsageSummary;
+  observedTier?: TtlMode;
   cacheHealth: CacheHealthSummary;
+  rhythm: RhythmSummary;
   sessionGracePending: boolean;
   logicalTurnsSinceSessionSwitch: number;
   recommendation?: ModeRecommendation;
 }
 
-const MAX_RECENT_ASSISTANT_TURNS = 5;
-const MAX_RECENT_USER_PROMPTS = 8;
-const MIN_RECOMMENDATION_USER_PROMPTS_5M = 6;
-const MIN_RECOMMENDATION_USER_PROMPTS_1H = 4;
-const ASSISTANT_FALLBACK_DEDUPE_WINDOW_MS = 10 * 1000;
-const INTERRUPT_PLACEHOLDER_TEXT = '[Request interrupted by user]';
-const RECOMMEND_5M_MAX_MEDIAN_GAP_MS = 3 * 60 * 1000;
-const RECOMMEND_5M_MAX_SINGLE_GAP_MS = 5 * 60 * 1000;
-const RECOMMEND_1H_MIN_MEDIAN_GAP_MS = 5 * 60 * 1000;
-const STRONG_RECOMMEND_1H_MIN_MEDIAN_GAP_MS = 10 * 60 * 1000;
+const MAX_RECENT_TURNS_FOR_HEALTH = 5;
+const MAX_TRACKERS = 4;
+
+const EMPTY_HEALTH: CacheHealthSummary = {
+  recentTurns: 0,
+  recentColdStarts: 0,
+  recentTtlExpiryColdStarts: 0,
+  recentOtherColdStarts: 0,
+  recentLowHitTurns: 0,
+};
 
 function normalizePath(input?: string): string | undefined {
   if (!input) {
@@ -148,174 +135,52 @@ async function getLastWriteTimeMs(targetPath: string): Promise<number | undefine
   }
 }
 
-function toNumber(value: unknown): number {
-  return typeof value === 'number' && Number.isFinite(value) ? value : 0;
-}
-
-function buildUsageSummary(timestamp: number | undefined, usage: TranscriptUsagePayload): TurnUsageSummary {
-  const inputTokens = toNumber(usage.input_tokens);
-  const cacheReadTokens = toNumber(usage.cache_read_input_tokens);
-  const cacheCreationTokens = toNumber(usage.cache_creation_input_tokens);
-  const outputTokens = toNumber(usage.output_tokens);
-  const grossInputTokens = inputTokens + cacheReadTokens + cacheCreationTokens;
-  const effectiveInputTokens = inputTokens + cacheCreationTokens;
-  const cacheHitRatio = grossInputTokens > 0 ? cacheReadTokens / grossInputTokens : undefined;
-
+function toUsageSummary(call: ApiCall): TurnUsageSummary {
+  const effectiveInputTokens = call.inputTokens + call.cacheCreationTokens;
   return {
-    timestamp,
-    inputTokens,
-    cacheReadTokens,
-    cacheCreationTokens,
-    outputTokens,
-    grossInputTokens,
+    timestamp: call.responseAt,
+    inputTokens: call.inputTokens,
+    cacheReadTokens: call.cacheReadTokens,
+    cacheCreationTokens: call.cacheCreationTokens,
+    outputTokens: call.outputTokens,
+    grossInputTokens: call.grossInputTokens,
     effectiveInputTokens,
-    cacheHitRatio,
+    cacheHitRatio: call.grossInputTokens > 0 ? call.cacheReadTokens / call.grossInputTokens : undefined,
   };
 }
 
-function getTranscriptContentItems(line: TranscriptLine): TranscriptContentItem[] {
-  return Array.isArray(line.message?.content)
-    ? line.message.content
-    : [];
-}
-
-function normalizePromptText(value: unknown): string | undefined {
-  if (typeof value !== 'string') {
-    return undefined;
-  }
-
-  const trimmed = value.trim();
-  if (!trimmed || trimmed === INTERRUPT_PLACEHOLDER_TEXT) {
-    return undefined;
-  }
-
-  return trimmed;
-}
-
-function isActualUserPrompt(line: TranscriptLine): line is TranscriptLine & { timestamp: string } {
-  if (line.type !== 'user' || !line.timestamp || line.isMeta) {
-    return false;
-  }
-
-  const contentItems = getTranscriptContentItems(line);
-  if (contentItems.some((item) => item.type === 'tool_result')) {
-    return false;
-  }
-
-  return contentItems.some((item) => item.type === 'text' && Boolean(normalizePromptText(item.text)));
-}
-
-function buildAssistantTokenTuple(usage: TurnUsageSummary): string {
-  return [
-    usage.inputTokens,
-    usage.cacheReadTokens,
-    usage.cacheCreationTokens,
-    usage.outputTokens,
-  ].join(':');
-}
-
-function isFallbackAssistantDuplicate(
-  candidate: AssistantTurnCandidate,
-  recentTurns: AssistantTurnCandidate[],
-): boolean {
-  if (candidate.usage.timestamp === undefined) {
-    return false;
-  }
-
-  const candidateTimestamp = candidate.usage.timestamp;
-  return recentTurns.some((existing) =>
-    existing.usage.timestamp !== undefined
-    && existing.tokenTuple === candidate.tokenTuple
-    && Math.abs(existing.usage.timestamp - candidateTimestamp) <= ASSISTANT_FALLBACK_DEDUPE_WINDOW_MS,
-  );
-}
-
-function isDuplicateAssistantTurn(
-  candidate: AssistantTurnCandidate,
-  recentTurns: AssistantTurnCandidate[],
-  seenRequestIds: Set<string>,
-  seenMessageIds: Set<string>,
-): boolean {
-  if (candidate.requestId && seenRequestIds.has(candidate.requestId)) {
-    return true;
-  }
-
-  if (candidate.messageId && seenMessageIds.has(candidate.messageId)) {
-    return true;
-  }
-
-  if (candidate.requestId || candidate.messageId) {
-    return false;
-  }
-
-  return isFallbackAssistantDuplicate(candidate, recentTurns);
-}
-
-function calculateMedian(values: number[]): number | undefined {
-  if (values.length === 0) {
-    return undefined;
-  }
-
-  const ascending = [...values].sort((a, b) => a - b);
-  const middleIndex = Math.floor(ascending.length / 2);
-
-  if (ascending.length % 2 === 1) {
-    return ascending[middleIndex];
-  }
-
-  return (ascending[middleIndex - 1] + ascending[middleIndex]) / 2;
-}
-
-function buildRecommendation(
-  userPromptTimestamps: number[],
-  currentMode: TtlMode,
-): ModeRecommendation | undefined {
-  const ascending = [...userPromptTimestamps].sort((a, b) => a - b);
-  const gaps: number[] = [];
-
-  for (let index = 1; index < ascending.length; index += 1) {
-    gaps.push(ascending[index] - ascending[index - 1]);
-  }
-
-  const medianGapMs = calculateMedian(gaps);
-  if (medianGapMs === undefined) {
-    return undefined;
-  }
-
-  if (medianGapMs < RECOMMEND_5M_MAX_MEDIAN_GAP_MS) {
-    if (currentMode !== '1h' || userPromptTimestamps.length < MIN_RECOMMENDATION_USER_PROMPTS_5M) {
-      return undefined;
+function buildSignals(state: TranscriptState, configuredMode: TtlMode): TranscriptSignals {
+  const realTurns = state.turns.filter((turn) => !turn.synthetic && turn.callCount > 0);
+  const recent = realTurns.slice(-MAX_RECENT_TURNS_FOR_HEALTH);
+  const recentTtlExpiryColdStarts = recent.filter((turn) => turn.coldStartKind === 'ttl_expiry').length;
+  const recentOtherColdStarts = recent.filter((turn) => turn.coldStartKind === 'other').length;
+  const recentLowHitTurns = recent.filter((turn) => {
+    if (turn.coldStartKind === 'session_start' || !turn.openingCall) {
+      return false;
     }
 
-    const maxGap = Math.max(...gaps);
-    if (maxGap >= RECOMMEND_5M_MAX_SINGLE_GAP_MS) {
-      return undefined;
-    }
+    const gross = turn.openingCall.grossInputTokens;
+    return gross > 0 && turn.openingCall.cacheReadTokens / gross < 0.2;
+  }).length;
 
-    return {
-      mode: '5m',
-      reason: 'Tip: 5m mode may save tokens.',
-    };
-  }
-
-  if (medianGapMs < RECOMMEND_1H_MIN_MEDIAN_GAP_MS) {
-    return undefined;
-  }
-
-  if (currentMode !== '5m' || userPromptTimestamps.length < MIN_RECOMMENDATION_USER_PROMPTS_1H) {
-    return undefined;
-  }
-
-  if (medianGapMs <= STRONG_RECOMMEND_1H_MIN_MEDIAN_GAP_MS) {
-    return {
-      mode: '1h',
-      reason: 'Tip: 1h mode is safer.',
-    };
-  }
+  const effectiveTier = state.observedTier ?? configuredMode;
 
   return {
-    mode: '1h',
-    reason: 'Tip: strongly recommend 1h mode.',
+    lastUserPromptAt: state.lastUserPromptAt,
+    cacheAnchorAt: state.lastRequestAt,
+    lastCompletedTurn: state.lastCompletedCall ? toUsageSummary(state.lastCompletedCall) : undefined,
+    observedTier: state.observedTier,
+    cacheHealth: {
+      recentTurns: recent.length,
+      recentColdStarts: recentTtlExpiryColdStarts + recentOtherColdStarts,
+      recentTtlExpiryColdStarts,
+      recentOtherColdStarts,
+      recentLowHitTurns,
+    },
+    rhythm: summarizeRhythm(realTurns.slice(-RECOMMENDATION_WINDOW_TURNS)),
+    sessionGracePending: realTurns.length < 2,
+    logicalTurnsSinceSessionSwitch: realTurns.length,
+    recommendation: buildRecommendation(state.turns, state.calls, effectiveTier),
   };
 }
 
@@ -325,17 +190,15 @@ export class TtlWatcher {
   private readonly projectsDir: string;
   private readonly pollIntervalMs: number;
   private readonly transcriptPathCache = new Map<string, string>();
+  private readonly trackers = new Map<string, TranscriptTracker>();
   private workspacePath?: string;
   private intervalHandle?: NodeJS.Timeout;
   private previousRateLimits?: { fiveHour?: number; sevenDay?: number };
   private snapshot: TtlSnapshot = {
     mode: '5m',
+    configuredMode: '5m',
     ttlMs: getTtlDurationMs('5m'),
-    cacheHealth: {
-      recentTurns: 0,
-      recentColdStarts: 0,
-      recentLowHitTurns: 0,
-    },
+    cacheHealth: { ...EMPTY_HEALTH },
     sessionGracePending: false,
     logicalTurnsSinceSessionSwitch: 0,
     awaitingAssistantTurn: false,
@@ -377,6 +240,7 @@ export class TtlWatcher {
     return {
       ...this.snapshot,
       cacheHealth: { ...this.snapshot.cacheHealth },
+      rhythm: this.snapshot.rhythm ? { ...this.snapshot.rhythm } : undefined,
       lastCompletedTurn: this.snapshot.lastCompletedTurn
         ? { ...this.snapshot.lastCompletedTurn }
         : undefined,
@@ -402,8 +266,7 @@ export class TtlWatcher {
   }
 
   async refresh(): Promise<TtlSnapshot> {
-    const mode = await this.settingsManager.getMode();
-    const ttlMs = getTtlDurationMs(mode);
+    const configuredMode = await this.settingsManager.getMode();
 
     try {
       const activeSession = await this.findActiveSessionForWorkspace(this.workspacePath);
@@ -411,7 +274,7 @@ export class TtlWatcher {
         ? activeSession.transcriptPath ?? await this.findTranscriptPath(activeSession.sessionId, activeSession.cwd)
         : undefined;
       const transcriptSignals = transcriptPath
-        ? await this.readTranscriptSignals(transcriptPath, mode)
+        ? await this.readTranscriptSignals(transcriptPath, configuredMode)
         : undefined;
       const rateLimitBridgePath = await this.settingsManager.getRateLimitBridgePath();
       const rateLimits = await readRateLimitSummary(rateLimitBridgePath, activeSession?.sessionId);
@@ -434,21 +297,23 @@ export class TtlWatcher {
         };
       }
 
+      const mode = transcriptSignals?.observedTier ?? configuredMode;
+
       this.snapshot = {
         workspacePath: this.workspacePath,
         mode,
-        ttlMs,
+        configuredMode,
+        observedTier: transcriptSignals?.observedTier,
+        ttlMs: getTtlDurationMs(mode),
         sessionId: activeSession?.sessionId,
         transcriptPath,
         lastUserPromptAt: transcriptSignals?.lastUserPromptAt,
+        cacheAnchorAt: transcriptSignals?.cacheAnchorAt,
         lastCompletedTurn: transcriptSignals?.lastCompletedTurn,
         rateLimits,
         rateLimitDelta,
-        cacheHealth: transcriptSignals?.cacheHealth ?? {
-          recentTurns: 0,
-          recentColdStarts: 0,
-          recentLowHitTurns: 0,
-        },
+        cacheHealth: transcriptSignals?.cacheHealth ?? { ...EMPTY_HEALTH },
+        rhythm: transcriptSignals?.rhythm,
         sessionGracePending: transcriptSignals?.sessionGracePending ?? false,
         logicalTurnsSinceSessionSwitch: transcriptSignals?.logicalTurnsSinceSessionSwitch ?? 0,
         recommendation: transcriptSignals?.recommendation,
@@ -466,16 +331,13 @@ export class TtlWatcher {
     } catch (error) {
       this.snapshot = {
         workspacePath: this.workspacePath,
-        mode,
-        ttlMs,
+        mode: configuredMode,
+        configuredMode,
+        ttlMs: getTtlDurationMs(configuredMode),
         rateLimits: this.snapshot.rateLimits
           ? { ...this.snapshot.rateLimits }
           : undefined,
-        cacheHealth: {
-          recentTurns: 0,
-          recentColdStarts: 0,
-          recentLowHitTurns: 0,
-        },
+        cacheHealth: { ...EMPTY_HEALTH },
         sessionGracePending: false,
         logicalTurnsSinceSessionSwitch: 0,
         awaitingAssistantTurn: false,
@@ -486,6 +348,36 @@ export class TtlWatcher {
     }
 
     return this.getSnapshot();
+  }
+
+  private getTracker(transcriptPath: string): TranscriptTracker {
+    const existing = this.trackers.get(transcriptPath);
+    if (existing) {
+      // Move to the end so the least recently used tracker is evicted first.
+      this.trackers.delete(transcriptPath);
+      this.trackers.set(transcriptPath, existing);
+      return existing;
+    }
+
+    const tracker = new TranscriptTracker(transcriptPath);
+    this.trackers.set(transcriptPath, tracker);
+
+    while (this.trackers.size > MAX_TRACKERS) {
+      const oldestKey = this.trackers.keys().next().value;
+      if (oldestKey === undefined) {
+        break;
+      }
+
+      this.trackers.delete(oldestKey);
+    }
+
+    return tracker;
+  }
+
+  private async readTranscriptSignals(transcriptPath: string, configuredMode: TtlMode): Promise<TranscriptSignals> {
+    const tracker = this.getTracker(transcriptPath);
+    await tracker.refresh();
+    return buildSignals(tracker.getState(), configuredMode);
   }
 
   private async findActiveSessionForWorkspace(workspacePath?: string): Promise<ResolvedClaudeSession | undefined> {
@@ -678,157 +570,5 @@ export class TtlWatcher {
     }
 
     return undefined;
-  }
-
-  private async readTranscriptSignals(jsonlPath: string, mode: TtlMode): Promise<TranscriptSignals> {
-    const handle = await fs.open(jsonlPath, 'r');
-
-    try {
-      const stat = await handle.stat();
-      const chunkSize = 64 * 1024;
-      let position = stat.size;
-      let remainder = '';
-
-      let lastUserPromptAt: number | undefined;
-      let lastCompletedTurn: TurnUsageSummary | undefined;
-      const recentAssistantTurns: AssistantTurnCandidate[] = [];
-      const recentUserPromptAts: number[] = [];
-      const seenAssistantRequestIds = new Set<string>();
-      const seenAssistantMessageIds = new Set<string>();
-
-      while (position > 0) {
-        const readSize = Math.min(chunkSize, position);
-        position -= readSize;
-
-        const buffer = Buffer.alloc(readSize);
-        const { bytesRead } = await handle.read(buffer, 0, readSize, position);
-        const text = `${buffer.toString('utf8', 0, bytesRead)}${remainder}`;
-        const lines = text.split(/\r?\n/);
-
-        if (position > 0) {
-          remainder = lines.shift() ?? '';
-        } else {
-          remainder = '';
-        }
-
-        for (let index = lines.length - 1; index >= 0; index -= 1) {
-          const parsed = this.parseTranscriptLine(lines[index]);
-          if (!parsed) {
-            continue;
-          }
-
-          if (
-            parsed.type === 'assistant'
-            && parsed.message?.usage
-            && parsed.message.stop_reason !== 'tool_use'
-            && recentAssistantTurns.length < MAX_RECENT_ASSISTANT_TURNS
-          ) {
-            const timestamp = parsed.timestamp ? Date.parse(parsed.timestamp) : undefined;
-            const usage = buildUsageSummary(
-              Number.isNaN(timestamp ?? Number.NaN) ? undefined : timestamp,
-              parsed.message.usage,
-            );
-
-            const candidate: AssistantTurnCandidate = {
-              requestId: parsed.requestId,
-              messageId: parsed.message.id,
-              tokenTuple: buildAssistantTokenTuple(usage),
-              usage,
-            };
-
-            if (!isDuplicateAssistantTurn(
-              candidate,
-              recentAssistantTurns,
-              seenAssistantRequestIds,
-              seenAssistantMessageIds,
-            )) {
-              recentAssistantTurns.push(candidate);
-              if (candidate.requestId) {
-                seenAssistantRequestIds.add(candidate.requestId);
-              }
-
-              if (candidate.messageId) {
-                seenAssistantMessageIds.add(candidate.messageId);
-              }
-
-              if (!lastCompletedTurn) {
-                lastCompletedTurn = usage;
-              }
-            }
-          }
-
-          if (isActualUserPrompt(parsed)) {
-            const timestamp = Date.parse(parsed.timestamp);
-            if (!Number.isNaN(timestamp)) {
-              if (!lastUserPromptAt) {
-                lastUserPromptAt = timestamp;
-              }
-
-              if (recentUserPromptAts.length < MAX_RECENT_USER_PROMPTS) {
-                recentUserPromptAts.push(timestamp);
-              }
-            }
-          }
-
-          if (
-            lastUserPromptAt
-            && recentAssistantTurns.length >= MAX_RECENT_ASSISTANT_TURNS
-            && recentUserPromptAts.length >= MAX_RECENT_USER_PROMPTS
-          ) {
-            break;
-          }
-        }
-
-        if (
-          lastUserPromptAt
-          && recentAssistantTurns.length >= MAX_RECENT_ASSISTANT_TURNS
-          && recentUserPromptAts.length >= MAX_RECENT_USER_PROMPTS
-        ) {
-          break;
-        }
-      }
-
-      if (remainder) {
-        const parsed = this.parseTranscriptLine(remainder);
-        if (parsed && isActualUserPrompt(parsed) && !lastUserPromptAt) {
-          const timestamp = Date.parse(parsed.timestamp);
-          if (!Number.isNaN(timestamp)) {
-            lastUserPromptAt = timestamp;
-          }
-        }
-      }
-
-      const recentAssistantUsages = recentAssistantTurns.map((turn) => turn.usage);
-      const logicalTurnsSinceSessionSwitch = recentAssistantUsages.length;
-      const cacheHealth: CacheHealthSummary = {
-        recentTurns: logicalTurnsSinceSessionSwitch,
-        recentColdStarts: recentAssistantUsages.filter((usage) => usage.cacheReadTokens === 0 && usage.cacheCreationTokens > 0).length,
-        recentLowHitTurns: recentAssistantUsages.filter((usage) => usage.cacheHitRatio !== undefined && usage.cacheHitRatio < 0.2).length,
-      };
-
-      return {
-        lastUserPromptAt,
-        lastCompletedTurn,
-        cacheHealth,
-        sessionGracePending: logicalTurnsSinceSessionSwitch < 2,
-        logicalTurnsSinceSessionSwitch,
-        recommendation: buildRecommendation(recentUserPromptAts, mode),
-      };
-    } finally {
-      await handle.close();
-    }
-  }
-
-  private parseTranscriptLine(line: string): TranscriptLine | undefined {
-    const trimmed = line.trim();
-    if (!trimmed) {
-      return undefined;
-    }
-
-    try {
-      return JSON.parse(trimmed) as TranscriptLine;
-    } catch {
-      return undefined;
-    }
   }
 }
