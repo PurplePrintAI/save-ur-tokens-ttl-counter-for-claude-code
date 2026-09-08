@@ -2,7 +2,7 @@
   "name": "claude-ttl-counter",
   "displayName": "%extension.displayName%",
   "description": "%extension.description%",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "publisher": "purpleprintai",
   "license": "MIT",
   "repository": {
@@ -37,8 +37,37 @@
       {
         "command": "claudeTtl.installAdvisorSkill",
         "title": "%command.installAdvisorSkill.title%"
+      },
+      {
+        "command": "claudeTtl.connectSubscriptionUsage",
+        "title": "%command.connectSubscriptionUsage.title%"
+      },
+      {
+        "command": "claudeTtl.disconnectSubscriptionUsage",
+        "title": "%command.disconnectSubscriptionUsage.title%"
+      },
+      {
+        "command": "claudeTtl.refreshSubscriptionUsage",
+        "title": "%command.refreshSubscriptionUsage.title%"
       }
-    ]
+    ],
+    "configuration": {
+      "title": "Claude TTL Counter",
+      "properties": {
+        "claudeTtl.subscriptionUsage.enabled": {
+          "type": "boolean",
+          "default": false,
+          "description": "%config.subscriptionUsage.enabled%"
+        },
+        "claudeTtl.subscriptionUsage.pollIntervalSeconds": {
+          "type": "number",
+          "default": 60,
+          "minimum": 20,
+          "maximum": 600,
+          "description": "%config.subscriptionUsage.pollIntervalSeconds%"
+        }
+      }
+    }
   },
   "scripts": {
     "compile": "tsc -p .",

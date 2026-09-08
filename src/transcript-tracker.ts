@@ -62,6 +62,14 @@ export interface LogicalTurn {
   partialHit: boolean;
 }
 
+/** A request Claude Code refused to send because a usage limit was hit. */
+export interface QuotaRejection {
+  at: number;
+  /** e.g. "five_hour", "seven_day" */
+  rateLimitType?: string;
+  resetsAt?: number;
+}
+
 export interface TranscriptState {
   turns: LogicalTurn[];
   calls: ApiCall[];
@@ -73,6 +81,7 @@ export interface TranscriptState {
   lastCompletedCall?: ApiCall;
   observedTier?: CacheTier;
   observedTierAt?: number;
+  lastQuotaRejection?: QuotaRejection;
 }
 
 interface TranscriptContentItem {
@@ -97,6 +106,11 @@ export interface TranscriptLine {
   isMeta?: boolean;
   isSidechain?: boolean;
   requestId?: string;
+  quotaLimits?: {
+    status?: unknown;
+    rateLimitType?: unknown;
+    resetsAt?: unknown;
+  };
   message?: {
     id?: string;
     model?: string;
@@ -105,6 +119,8 @@ export interface TranscriptLine {
     usage?: TranscriptUsage;
   };
 }
+
+const SYNTHETIC_MODEL = '<synthetic>';
 
 const INITIAL_TAIL_BYTES = 8 * 1024 * 1024;
 const READ_CHUNK_BYTES = 256 * 1024;
@@ -125,6 +141,15 @@ function parseTimestamp(value?: string): number | undefined {
 
   const parsed = Date.parse(value);
   return Number.isNaN(parsed) ? undefined : parsed;
+}
+
+/** quotaLimits.resetsAt is unix seconds; accept milliseconds and ISO strings too. */
+function parseResetTimestamp(value: unknown): number | undefined {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return value < 1e12 ? value * 1000 : value;
+  }
+
+  return typeof value === 'string' ? parseTimestamp(value) : undefined;
 }
 
 export type UserLineKind = 'prompt' | 'tool_result' | 'ignore';
@@ -195,6 +220,7 @@ export class TranscriptTracker {
   private lastCompletedCall?: ApiCall;
   private observedTier?: CacheTier;
   private observedTierAt?: number;
+  private lastQuotaRejection?: QuotaRejection;
 
   constructor(transcriptPath: string) {
     this.transcriptPath = transcriptPath;
@@ -222,6 +248,7 @@ export class TranscriptTracker {
     this.lastCompletedCall = undefined;
     this.observedTier = undefined;
     this.observedTierAt = undefined;
+    this.lastQuotaRejection = undefined;
   }
 
   /** Reads any bytes appended since the last refresh. Re-reads from scratch if the file shrank. */
@@ -274,6 +301,7 @@ export class TranscriptTracker {
       lastCompletedCall: this.lastCompletedCall,
       observedTier: this.observedTier,
       observedTierAt: this.observedTierAt,
+      lastQuotaRejection: this.lastQuotaRejection ? { ...this.lastQuotaRejection } : undefined,
     };
   }
 
@@ -320,8 +348,20 @@ export class TranscriptTracker {
       return;
     }
 
-    if (parsed.type === 'assistant' && !parsed.isSidechain && parsed.message?.usage) {
-      this.handleAssistantLine(parsed, timestamp);
+    if (parsed.type === 'assistant' && !parsed.isSidechain) {
+      if (parsed.quotaLimits?.status === 'rejected') {
+        this.lastQuotaRejection = {
+          at: timestamp,
+          rateLimitType: typeof parsed.quotaLimits.rateLimitType === 'string' ? parsed.quotaLimits.rateLimitType : undefined,
+          resetsAt: parseResetTimestamp(parsed.quotaLimits.resetsAt),
+        };
+        return;
+      }
+
+      // Synthetic messages (limit hits, interrupts) carry no real request; skip them as calls.
+      if (parsed.message?.usage && parsed.message.model !== SYNTHETIC_MODEL) {
+        this.handleAssistantLine(parsed, timestamp);
+      }
     }
   }
 

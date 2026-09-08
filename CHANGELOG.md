@@ -4,6 +4,28 @@ All notable changes to Claude TTL Counter.
 
 ---
 
+## [0.7.0] — 2026-09-09
+
+### Added
+
+- **Real subscription usage (opt-in)** — `src/subscription-usage.ts` reads the login token Claude Code already stores (`~/.claude/.credentials.json`, or the macOS Keychain) and calls `GET https://api.anthropic.com/api/oauth/usage`, the same request the CLI's `/usage` makes. The status bar now shows real 5-hour / 7-day utilization, per-model weekly limits (`7d Fable: 41%`), and reset countdowns inside VS Code / Cursor, where the terminal statusline never runs. Off by default; a one-time prompt offers it on first launch, and it can be toggled from the status bar menu, the commands *Connect / Disconnect / Refresh subscription usage*, or `claudeTtl.subscriptionUsage.enabled`. Poll interval: `claudeTtl.subscriptionUsage.pollIntervalSeconds` (default 60) plus one fetch about 1.5 s after every completed turn
+- **Per-turn delta that means something** — the delta in the rolling flash is now the difference between the sample taken after this turn and the one taken after the previous turn, instead of whatever changed between two 3-second polls
+- **High-usage state** — the usage flash turns red and a one-time warning fires per reset window when 5h or 7d reaches 90%
+- **Limit-hit line** — the transcript tracker records Claude Code's "You've hit your limit" refusals (`quotaLimits`) and the tooltip shows `Limit hit at 07:22 (five_hour) | resets in 38m`
+- Tooltip lines for the usage source (`subscription (max) | updated 12s ago` or `statusline bridge`) and for why a connection is not delivering data (not connected / token expired / no login / HTTP status)
+
+### Changed
+
+- The statusline bridge is now a fallback: whichever source has the fresher sample wins
+- Privacy statement updated — zero network calls by default; the optional connection sends only the bearer token, only to `api.anthropic.com`
+- Synthetic assistant lines (`<synthetic>` model: limit hits, interrupts) are no longer counted as API calls in the recommendation window
+
+### Fixed
+
+- `resets_at` from the statusline bridge (unix seconds) was parsed as milliseconds
+
+---
+
 ## [0.6.0] — 2026-09-05
 
 ### Changed

@@ -33,6 +33,10 @@ export class StatusBarController {
         this.item.color = '#ffffff';
         this.item.backgroundColor = new vscode.ThemeColor('statusBarItem.warningBackground');
         return;
+      case 'rate_limit_high':
+        this.item.color = new vscode.ThemeColor('statusBarItem.errorForeground');
+        this.item.backgroundColor = new vscode.ThemeColor('statusBarItem.errorBackground');
+        return;
       case 'countdown':
       default:
         break;

@@ -13,7 +13,8 @@
 - [Ask Claude: /ttl-advisor](#ask-claude-ttl-advisor)
 - [Per-project TTL](#per-project-ttl)
 - [Rolling status bar](#rolling-status-bar)
-- [Statusline bridge](#statusline-bridge)
+- [Subscription usage (5h / 7d)](#subscription-usage-5h--7d)
+- [Statusline bridge (fallback)](#statusline-bridge-fallback)
 
 ---
 
@@ -197,18 +198,51 @@ After each turn completes, the status bar briefly shows your usage before return
 [4] $(clock) TTL 42:09          ← Return to countdown
 ```
 
-- **Step 2 only**: if the statusline bridge is not connected, step 3 is skipped
+- **Step 2 only**: if neither subscription usage nor the statusline bridge is connected, step 3 is skipped
+- **Red step 3**: when any window is at 90% or more, the usage flash uses the error background
 - **Warning priority**: if a cache reset warning is active, rolling is paused
 
 ---
 
-## Statusline bridge
+## Subscription usage (5h / 7d)
 
-The 5h/7d usage display requires a bridge that writes Claude Code's rate limit data to a local JSON file.
+The IDE extension of Claude Code never exposes your 5-hour / weekly utilization locally, so the extension asks Anthropic for it the same way the CLI's `/usage` does: `GET https://api.anthropic.com/api/oauth/usage`, authenticated with the login token Claude Code already stores (`~/.claude/.credentials.json`, or the macOS Keychain).
+
+### Connect
+
+- Accept the one-time prompt on first launch, **or**
+- Click the status bar → **Connect subscription usage (real 5h/7d)**, **or**
+- Run *Claude TTL: Connect subscription usage* from the command palette, **or**
+- Set `"claudeTtl.subscriptionUsage.enabled": true` in your VS Code settings
+
+Off by default. This is the extension's only network call: one request per `claudeTtl.subscriptionUsage.pollIntervalSeconds` (default 60, minimum 20) plus one about 1.5 seconds after each completed turn, so the rolling flash can show what that turn cost. Only the bearer token is sent, only to `api.anthropic.com`. Tokens are never refreshed or written by the extension.
+
+### What you see
+
+- Rolling flash: `$(dashboard) 5h 22.0% (+0.4%) | 7d 23.0%` — the delta is the difference between the sample after this turn and the sample after the previous one
+- Tooltip: `5h usage: 22.0% | resets in 1h 12m`, `7d usage: 23.0% | resets in 5.8d`, per-model lines such as `7d Fable: 41%`, and `Usage source: subscription (max) | updated 12s ago`
+- A one-time warning per reset window when 5h or 7d passes 90%
+- `Limit hit at 07:22 (five_hour) | resets in 38m` when the transcript contains a refused request
+
+### Troubleshooting
+
+| Tooltip says | Meaning | Fix |
+|---|---|---|
+| `Subscription usage: not connected` | Feature is off | Connect from the status bar menu |
+| `waiting for Claude Code to refresh its login` | The stored token has expired | Send any prompt in Claude Code; it refreshes the token, the extension retries within a minute |
+| `no Claude Code login found on this machine` | No `claudeAiOauth` entry in `.credentials.json` / Keychain (API-key users, or not logged in) | Log in to Claude Code with your subscription (`/login`) |
+| `temporarily unavailable (HTTP 429)` | Endpoint asked us to back off | Nothing to do; polling resumes after the retry-after window |
+| `temporarily unavailable (HTTP 401)` | Token rejected | Re-login in Claude Code; the extension retries after 10 minutes |
+
+---
+
+## Statusline bridge (fallback)
+
+Before v0.7 the only source was a bridge that writes Claude Code's statusline output to a local JSON file. It still works, and the extension uses it whenever its file is fresher than the last subscription sample — useful if you prefer no network calls from the extension and use the terminal CLI.
 
 ### How it works
 
-1. Claude Code outputs rate limit info via its statusline
+1. Claude Code outputs rate limit info via its statusline (terminal CLI only)
 2. `bridge/write-rate-limits.js` reads that output and writes to `~/.claude/ttl-counter-rate-limits.json`
 3. The extension reads that file every 3 seconds
 

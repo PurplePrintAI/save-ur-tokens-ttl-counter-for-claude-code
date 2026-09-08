@@ -25,6 +25,7 @@ I built this because I kept hitting the daily limit without understanding why. A
 - [Important note on cost](#important-note-on-cost)
 - [What it does](#what-it-does)
 - [How it works](#how-it-works)
+- [Real subscription usage (5h / 7d)](#real-subscription-usage-5h--7d)
 - [How the recommendation works](#how-the-recommendation-works)
 - [Which TTL mode?](#which-ttl-mode-should-you-use)
 - [Install](#install)
@@ -74,6 +75,7 @@ This isn't a niche issue. In early March 2025, Anthropic quietly changed the def
 - Classifies cold starts on the opening call of each turn: session start / TTL expiry / other (model switch, compaction, reload)
 - **Counterfactual recommendation**: replays your last 30 turns under both TTLs with real timestamps and token counts, and recommends the cheaper one with the margin (e.g. "1h would have cost about 27% less")
 - **`/ttl-advisor`**: one click installs a Claude Code skill so your own agent runs the analyzer and explains the recommendation in context
+- **Real subscription usage (opt-in)**: reads your 5-hour / 7-day / per-model weekly utilization from Anthropic with the login Claude Code already stores, so the status bar shows the same numbers as `/usage` — no terminal statusline needed
 - **Rolling status bar feedback** after each turn: `TTL → turn usage → 5h/7d rate limit → TTL`
 
 **What you see:**
@@ -82,12 +84,12 @@ This isn't a niche issue. In early March 2025, Anthropic quietly changed the def
 |---|---|---|
 | **Status bar** | `$(clock) TTL 42:15 · my-project` | Default: live countdown + project name. 5-stage color |
 | **Turn usage flash** | `$(pulse) 84k in · hit 82% · 1.3k out` | 3s after turn completes. Distinct background color |
-| **Rate limit flash** | `$(dashboard) 5h 25.6% (+2.1%) · 7d 42.0%` | Cumulative usage + per-turn delta. Bridge required |
+| **Rate limit flash** | `$(dashboard) 5h 25.6% (+2.1%) · 7d 42.0%` | Real 5h/7d usage + per-turn delta. Turns red at 90%. Subscription connection (opt-in) or statusline bridge |
 | **Tooltip** (hover) | `Rhythm: idle gap median 3.4m · p75 16m` | Cache hit ratio, health, observed tier, TTL-expiry rebuilds, recommendation with margin |
 | **Quick Pick** (click) | `$(check) 1h mode · Current · 42:15` | Switch between 5m and 1h, or **Ask Claude why (/ttl-advisor)** |
 | **Notification** | `"1h would have cost about 27% less. Switch now?"` | Once per session on a strong recommendation, with **Switch** / **Ask Claude** buttons. A separate warning fires when TTL-expiry resets pile up on 5m |
 
-> **"Why don't I see 5h/7d usage?"** The 5h/7d rate limit display is not yet automatically available. The extension can show it if rate limit data is written to `~/.claude/ttl-counter-rate-limits.json`, but there's currently no automatic way to populate this file from within the VS Code extension environment. We're [researching solutions](https://github.com/PurplePrintAI/save-ur-usage-limit-ttl-counter-for-claude-code/issues/1). For now, the rolling sequence is `TTL → turn usage → TTL`.
+> **"Why don't I see 5h/7d usage?"** Click the status bar → **Connect subscription usage**, or accept the one-time prompt on first launch. Until v0.6 the numbers only appeared when Claude Code's terminal statusline wrote them to a bridge file, which never happens inside the VS Code / Cursor extension. v0.7 reads them from Anthropic directly — see [Real subscription usage](#real-subscription-usage-5h--7d). Without a connection, the rolling sequence is `TTL → turn usage → TTL`.
 
 ## How it works
 
@@ -97,6 +99,21 @@ This extension does **not** patch the Claude Code extension and does **not** pro
 - `~/.claude/projects/**/<sessionId>.jsonl` — request timestamps, cache usage, and the cache tier per request (read incrementally: only lines appended since the last poll are parsed)
 - `~/.claude/settings.json` — TTL mode read/write
 - `~/.claude/skills/ttl-advisor/` — written only when you install the `/ttl-advisor` skill
+- `~/.claude/.credentials.json` (macOS: Keychain) — read only when you connect subscription usage, to send Claude Code's own login token to `api.anthropic.com/api/oauth/usage`
+
+## Real subscription usage (5h / 7d)
+
+Claude Code shows your 5-hour and weekly utilization in `/usage`, but it never writes those numbers anywhere the extension can read — the terminal statusline gets them, the IDE extension doesn't. So v0.7 asks Anthropic directly: the same `GET /api/oauth/usage` request the CLI makes, authenticated with the login token Claude Code already keeps on this machine. You get:
+
+- **5h and 7d utilization** with reset countdowns (`5h 22.0% | resets in 1h 12m`)
+- **Per-model weekly limits** when your plan has them (`7d Fable: 41%`)
+- **Per-turn delta** in the rolling flash: a fresh sample is taken right after each turn completes, so `(+2.1%)` is what that turn cost
+- **Red flash and a one-time warning** when a window passes 90%
+- **"Limit hit at 07:22 (five_hour) | resets in 38m"** in the tooltip when the transcript shows a refused request
+
+How to connect: click the status bar → **Connect subscription usage**, or run *Claude TTL: Connect subscription usage*. The first launch also offers it once. It is **off by default** because it is the extension's only network call: one request about every minute (`claudeTtl.subscriptionUsage.pollIntervalSeconds`) plus one after each turn, sent only to `api.anthropic.com`, carrying only the bearer token. The extension never refreshes or writes tokens; if the token has expired it simply waits for Claude Code to refresh it on its next request. Disconnect anytime from the same menu or `claudeTtl.subscriptionUsage.enabled`.
+
+The statusline bridge from v0.4 still works and is used as a fallback whenever its file is fresher than the last subscription sample.
 
 ## How the recommendation works
 
@@ -188,10 +205,10 @@ Automatically detects VS Code or Cursor and installs the latest version.
 
 ```bash
 # VS Code
-curl -L https://github.com/PurplePrintAI/save-ur-usage-limit-ttl-counter-for-claude-code/releases/latest/download/claude-ttl-counter-0.6.0.vsix -o /tmp/ttl.vsix && code --install-extension /tmp/ttl.vsix
+curl -L https://github.com/PurplePrintAI/save-ur-usage-limit-ttl-counter-for-claude-code/releases/latest/download/claude-ttl-counter-0.7.0.vsix -o /tmp/ttl.vsix && code --install-extension /tmp/ttl.vsix
 
 # Cursor
-curl -L https://github.com/PurplePrintAI/save-ur-usage-limit-ttl-counter-for-claude-code/releases/latest/download/claude-ttl-counter-0.6.0.vsix -o /tmp/ttl.vsix && cursor --install-extension /tmp/ttl.vsix
+curl -L https://github.com/PurplePrintAI/save-ur-usage-limit-ttl-counter-for-claude-code/releases/latest/download/claude-ttl-counter-0.7.0.vsix -o /tmp/ttl.vsix && cursor --install-extension /tmp/ttl.vsix
 ```
 
 ### Option 3: From IDE
@@ -230,7 +247,7 @@ node ~/.claude/skills/ttl-advisor/analyze-transcripts.js --all --json
 - Reads only local Claude files on your machine
 - Does not proxy or intercept Claude requests
 - Does not upload data anywhere
-- Zero network calls
+- Zero network calls by default. The optional subscription usage connection makes exactly one kind of request — `GET https://api.anthropic.com/api/oauth/usage` with the login token Claude Code already stores — about once a minute. It is off until you turn it on, and nothing else is ever sent
 - The `/ttl-advisor` analyzer reads timestamps and token counts only; its report contains no prompt text
 
 ## Development

@@ -2,7 +2,13 @@ import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
 
-import { RateLimitSummary, readRateLimitSummary } from './rate-limit-bridge';
+import {
+  RateLimitSource,
+  RateLimitSummary,
+  pickFreshestRateLimits,
+  readRateLimitSummary,
+  subscriptionUsageToSummary,
+} from './rate-limit-bridge';
 import {
   ModeRecommendation,
   RECOMMENDATION_WINDOW_TURNS,
@@ -11,7 +17,8 @@ import {
   summarizeRhythm,
 } from './recommendation';
 import { SettingsManager, TtlMode, getTtlDurationMs } from './settings-manager';
-import { ApiCall, TranscriptState, TranscriptTracker } from './transcript-tracker';
+import { SubscriptionUsageClient, SubscriptionUsageState } from './subscription-usage';
+import { ApiCall, QuotaRejection, TranscriptState, TranscriptTracker } from './transcript-tracker';
 
 interface ClaudeSessionFile {
   sessionId?: string;
@@ -46,12 +53,21 @@ export interface CacheHealthSummary {
 }
 
 export type { ModeRecommendation, RhythmSummary } from './recommendation';
+export type { QuotaRejection } from './transcript-tracker';
+export type { SubscriptionUsageState } from './subscription-usage';
 
 export type RollingState = 'countdown' | 'turn_usage' | 'rate_limit';
 
 export interface RateLimitDelta {
   fiveHourDelta?: number;
   sevenDayDelta?: number;
+}
+
+interface RateLimitBaseline {
+  source: RateLimitSource;
+  fiveHour?: number;
+  sevenDay?: number;
+  turnAt?: number;
 }
 
 export interface TtlSnapshot {
@@ -71,6 +87,10 @@ export interface TtlSnapshot {
   lastCompletedTurn?: TurnUsageSummary;
   rateLimits?: RateLimitSummary;
   rateLimitDelta?: RateLimitDelta;
+  /** Live subscription usage connection state (undefined when the feature is not wired). */
+  subscription?: SubscriptionUsageState;
+  /** Most recent "You've hit your limit" refusal seen in the transcript. */
+  quotaRejection?: QuotaRejection;
   cacheHealth: CacheHealthSummary;
   rhythm?: RhythmSummary;
   sessionGracePending: boolean;
@@ -92,6 +112,7 @@ interface TranscriptSignals {
   sessionGracePending: boolean;
   logicalTurnsSinceSessionSwitch: number;
   recommendation?: ModeRecommendation;
+  quotaRejection?: QuotaRejection;
 }
 
 const MAX_RECENT_TURNS_FOR_HEALTH = 5;
@@ -181,7 +202,12 @@ function buildSignals(state: TranscriptState, configuredMode: TtlMode): Transcri
     sessionGracePending: realTurns.length < 2,
     logicalTurnsSinceSessionSwitch: realTurns.length,
     recommendation: buildRecommendation(state.turns, state.calls, effectiveTier),
+    quotaRejection: state.lastQuotaRejection,
   };
+}
+
+function percentDelta(current?: number, baseline?: number): number | undefined {
+  return current !== undefined && baseline !== undefined ? current - baseline : undefined;
 }
 
 export class TtlWatcher {
@@ -191,9 +217,12 @@ export class TtlWatcher {
   private readonly pollIntervalMs: number;
   private readonly transcriptPathCache = new Map<string, string>();
   private readonly trackers = new Map<string, TranscriptTracker>();
+  private readonly subscriptionUsage?: SubscriptionUsageClient;
   private workspacePath?: string;
   private intervalHandle?: NodeJS.Timeout;
-  private previousRateLimits?: { fiveHour?: number; sevenDay?: number };
+  private lastSeenCompletedTurnAt?: number;
+  private rateLimitBaseline?: RateLimitBaseline;
+  private lastRateLimitDelta?: RateLimitDelta;
   private snapshot: TtlSnapshot = {
     mode: '5m',
     configuredMode: '5m',
@@ -210,9 +239,11 @@ export class TtlWatcher {
     settingsManager: SettingsManager;
     workspacePath?: string;
     pollIntervalMs?: number;
+    subscriptionUsage?: SubscriptionUsageClient;
   }) {
     this.settingsManager = options.settingsManager;
     this.workspacePath = options.workspacePath;
+    this.subscriptionUsage = options.subscriptionUsage;
     this.pollIntervalMs = options.pollIntervalMs ?? 3000;
     this.sessionsDir = path.join(os.homedir(), '.claude', 'sessions');
     this.projectsDir = path.join(os.homedir(), '.claude', 'projects');
@@ -230,6 +261,8 @@ export class TtlWatcher {
       clearInterval(this.intervalHandle);
       this.intervalHandle = undefined;
     }
+
+    this.subscriptionUsage?.dispose();
   }
 
   setWorkspacePath(workspacePath?: string): void {
@@ -245,12 +278,24 @@ export class TtlWatcher {
         ? { ...this.snapshot.lastCompletedTurn }
         : undefined,
       rateLimits: this.snapshot.rateLimits
-        ? { ...this.snapshot.rateLimits }
+        ? { ...this.snapshot.rateLimits, scoped: this.snapshot.rateLimits.scoped?.map((limit) => ({ ...limit })) }
+        : undefined,
+      subscription: this.snapshot.subscription
+        ? { ...this.snapshot.subscription }
+        : undefined,
+      quotaRejection: this.snapshot.quotaRejection
+        ? { ...this.snapshot.quotaRejection }
         : undefined,
       recommendation: this.snapshot.recommendation
         ? { ...this.snapshot.recommendation }
         : undefined,
     };
+  }
+
+  /** Forces a subscription usage fetch (used by the "refresh usage" command). */
+  async refreshSubscriptionUsage(): Promise<void> {
+    await this.subscriptionUsage?.refresh(true);
+    await this.refresh();
   }
 
   setRollingState(rollingState: RollingState): void {
@@ -276,26 +321,25 @@ export class TtlWatcher {
       const transcriptSignals = transcriptPath
         ? await this.readTranscriptSignals(transcriptPath, configuredMode)
         : undefined;
-      const rateLimitBridgePath = await this.settingsManager.getRateLimitBridgePath();
-      const rateLimits = await readRateLimitSummary(rateLimitBridgePath, activeSession?.sessionId);
-
-      const rateLimitDelta: RateLimitDelta | undefined = rateLimits && this.previousRateLimits
-        ? {
-            fiveHourDelta: rateLimits.fiveHourUsedPercentage !== undefined && this.previousRateLimits.fiveHour !== undefined
-              ? rateLimits.fiveHourUsedPercentage - this.previousRateLimits.fiveHour
-              : undefined,
-            sevenDayDelta: rateLimits.sevenDayUsedPercentage !== undefined && this.previousRateLimits.sevenDay !== undefined
-              ? rateLimits.sevenDayUsedPercentage - this.previousRateLimits.sevenDay
-              : undefined,
-          }
-        : undefined;
-
-      if (rateLimits) {
-        this.previousRateLimits = {
-          fiveHour: rateLimits.fiveHourUsedPercentage,
-          sevenDay: rateLimits.sevenDayUsedPercentage,
-        };
+      const completedTurnAt = transcriptSignals?.lastCompletedTurn?.timestamp;
+      if (completedTurnAt !== undefined && completedTurnAt !== this.lastSeenCompletedTurnAt) {
+        this.lastSeenCompletedTurnAt = completedTurnAt;
+        this.subscriptionUsage?.requestAfterTurn();
       }
+
+      if (activeSession?.sessionId && this.subscriptionUsage) {
+        await this.subscriptionUsage.maybePoll();
+        await this.subscriptionUsage.waitForInFlight(1500);
+      }
+
+      const subscription = this.subscriptionUsage?.getState();
+      const subscriptionSummary = subscription?.enabled && subscription.latest
+        ? subscriptionUsageToSummary(subscription.latest, subscription.subscriptionType)
+        : undefined;
+      const rateLimitBridgePath = await this.settingsManager.getRateLimitBridgePath();
+      const statuslineSummary = await readRateLimitSummary(rateLimitBridgePath, activeSession?.sessionId);
+      const rateLimits = pickFreshestRateLimits(subscriptionSummary, statuslineSummary);
+      const rateLimitDelta = this.computeRateLimitDelta(rateLimits, completedTurnAt);
 
       const mode = transcriptSignals?.observedTier ?? configuredMode;
 
@@ -312,6 +356,8 @@ export class TtlWatcher {
         lastCompletedTurn: transcriptSignals?.lastCompletedTurn,
         rateLimits,
         rateLimitDelta,
+        subscription,
+        quotaRejection: transcriptSignals?.quotaRejection,
         cacheHealth: transcriptSignals?.cacheHealth ?? { ...EMPTY_HEALTH },
         rhythm: transcriptSignals?.rhythm,
         sessionGracePending: transcriptSignals?.sessionGracePending ?? false,
@@ -337,6 +383,7 @@ export class TtlWatcher {
         rateLimits: this.snapshot.rateLimits
           ? { ...this.snapshot.rateLimits }
           : undefined,
+        subscription: this.subscriptionUsage?.getState(),
         cacheHealth: { ...EMPTY_HEALTH },
         sessionGracePending: false,
         logicalTurnsSinceSessionSwitch: 0,
@@ -348,6 +395,54 @@ export class TtlWatcher {
     }
 
     return this.getSnapshot();
+  }
+
+  /**
+   * Per-turn usage delta: the difference between the first sample taken after a completed turn
+   * and the sample recorded for the previous turn. Samples that predate the turn are ignored so
+   * the delta describes that turn rather than the polling cadence.
+   */
+  private computeRateLimitDelta(
+    summary: RateLimitSummary | undefined,
+    completedTurnAt: number | undefined,
+  ): RateLimitDelta | undefined {
+    if (!summary) {
+      return undefined;
+    }
+
+    const baseline = this.rateLimitBaseline;
+    if (!baseline || baseline.source !== summary.source) {
+      this.rateLimitBaseline = {
+        source: summary.source,
+        fiveHour: summary.fiveHourUsedPercentage,
+        sevenDay: summary.sevenDayUsedPercentage,
+        turnAt: completedTurnAt,
+      };
+      this.lastRateLimitDelta = undefined;
+      return undefined;
+    }
+
+    if (completedTurnAt === undefined || completedTurnAt === baseline.turnAt) {
+      return this.lastRateLimitDelta;
+    }
+
+    if (summary.updatedAt === undefined || summary.updatedAt < completedTurnAt) {
+      // No sample taken since the turn finished yet: show no delta rather than a stale one.
+      return undefined;
+    }
+
+    this.lastRateLimitDelta = {
+      fiveHourDelta: percentDelta(summary.fiveHourUsedPercentage, baseline.fiveHour),
+      sevenDayDelta: percentDelta(summary.sevenDayUsedPercentage, baseline.sevenDay),
+    };
+    this.rateLimitBaseline = {
+      source: summary.source,
+      fiveHour: summary.fiveHourUsedPercentage,
+      sevenDay: summary.sevenDayUsedPercentage,
+      turnAt: completedTurnAt,
+    };
+
+    return this.lastRateLimitDelta;
   }
 
   private getTracker(transcriptPath: string): TranscriptTracker {

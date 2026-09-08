@@ -5,7 +5,10 @@ import { hasRateLimitData } from './rate-limit-bridge';
 import { getModeLabel } from './settings-manager';
 import { TurnUsageSummary, TtlSnapshot } from './ttl-watcher';
 
-export type StatusVisualState = 'countdown' | 'turn_usage' | 'rate_limit' | 'warning' | 'expired' | 'error';
+export type StatusVisualState = 'countdown' | 'turn_usage' | 'rate_limit' | 'rate_limit_high' | 'warning' | 'expired' | 'error';
+
+/** Utilization (percent) at or above which a usage window is treated as nearly exhausted. */
+export const HIGH_USAGE_THRESHOLD = 90;
 
 export interface StatusPresentation {
   text: string;
@@ -28,6 +31,11 @@ const rateLimitPercentFormatter = new Intl.NumberFormat(locale, {
   minimumFractionDigits: 1,
   maximumFractionDigits: 1,
 });
+const clockFormatter = new Intl.DateTimeFormat(locale, {
+  hour: '2-digit',
+  minute: '2-digit',
+});
+const QUOTA_REJECTION_VISIBLE_MS = 5 * 60 * 60 * 1000;
 
 export function getCacheAnchorAt(snapshot: TtlSnapshot): number | undefined {
   return snapshot.cacheAnchorAt ?? snapshot.lastUserPromptAt;
@@ -131,21 +139,70 @@ function buildUsageLines(usage?: TurnUsageSummary): string[] {
   ];
 }
 
-function buildRateLimitTooltipLines(snapshot: TtlSnapshot): string[] {
-  if (!hasRateLimitData(snapshot.rateLimits)) {
-    return [];
+function formatResetHint(resetsAt: number | undefined, now: number): string {
+  if (resetsAt === undefined || resetsAt <= now) {
+    return '';
   }
 
-  const lines: string[] = [''];
-  if (snapshot.rateLimits?.fiveHourUsedPercentage !== undefined) {
-    lines.push(vscode.l10n.t('5h usage: {0}%', formatRateLimitPercent(snapshot.rateLimits.fiveHourUsedPercentage)));
+  return ` | ${vscode.l10n.t('resets in {0}', formatDurationShort(resetsAt - now))}`;
+}
+
+export function highestUsagePercent(snapshot: TtlSnapshot): number | undefined {
+  const values = [
+    snapshot.rateLimits?.fiveHourUsedPercentage,
+    snapshot.rateLimits?.sevenDayUsedPercentage,
+    ...(snapshot.rateLimits?.scoped ?? []).map((limit) => limit.usedPercentage),
+  ].filter((value): value is number => value !== undefined);
+
+  return values.length ? Math.max(...values) : undefined;
+}
+
+function buildRateLimitTooltipLines(snapshot: TtlSnapshot, now: number): string[] {
+  const lines: string[] = [];
+  const summary = snapshot.rateLimits;
+
+  if (summary && hasRateLimitData(summary)) {
+    if (summary.fiveHourUsedPercentage !== undefined) {
+      lines.push(`${vscode.l10n.t('5h usage: {0}%', formatRateLimitPercent(summary.fiveHourUsedPercentage))}${formatResetHint(summary.fiveHourResetsAt, now)}`);
+    }
+
+    if (summary.sevenDayUsedPercentage !== undefined) {
+      lines.push(`${vscode.l10n.t('7d usage: {0}%', formatRateLimitPercent(summary.sevenDayUsedPercentage))}${formatResetHint(summary.sevenDayResetsAt, now)}`);
+    }
+
+    for (const scoped of summary.scoped ?? []) {
+      lines.push(`${vscode.l10n.t('7d {0}: {1}%', scoped.label, formatRateLimitPercent(scoped.usedPercentage))}${formatResetHint(scoped.resetsAt, now)}`);
+    }
+
+    const age = summary.updatedAt !== undefined ? formatDurationShort(Math.max(0, now - summary.updatedAt)) : '--';
+    lines.push(summary.source === 'subscription'
+      ? vscode.l10n.t('Usage source: subscription ({0}) | updated {1} ago', summary.subscriptionType ?? 'claude.ai', age)
+      : vscode.l10n.t('Usage source: statusline bridge | updated {0} ago', age));
   }
 
-  if (snapshot.rateLimits?.sevenDayUsedPercentage !== undefined) {
-    lines.push(vscode.l10n.t('7d usage: {0}%', formatRateLimitPercent(snapshot.rateLimits.sevenDayUsedPercentage)));
+  const subscription = snapshot.subscription;
+  if (subscription) {
+    if (!subscription.enabled) {
+      lines.push(vscode.l10n.t('Subscription usage: not connected (click the status bar to connect)'));
+    } else if (subscription.status === 'token_expired') {
+      lines.push(vscode.l10n.t('Subscription usage: waiting for Claude Code to refresh its login'));
+    } else if (subscription.status === 'no_credentials') {
+      lines.push(vscode.l10n.t('Subscription usage: no Claude Code login found on this machine'));
+    } else if (subscription.status !== 'ok' && subscription.status !== 'disabled') {
+      lines.push(vscode.l10n.t('Subscription usage: temporarily unavailable ({0})', subscription.error ?? subscription.status));
+    }
   }
 
-  return lines;
+  const rejection = snapshot.quotaRejection;
+  if (
+    rejection
+    && now - rejection.at < QUOTA_REJECTION_VISIBLE_MS
+    && (rejection.resetsAt === undefined || rejection.resetsAt > now)
+  ) {
+    lines.push(`${vscode.l10n.t('Limit hit at {0} ({1})', clockFormatter.format(rejection.at), rejection.rateLimitType ?? 'usage')}${formatResetHint(rejection.resetsAt, now)}`);
+  }
+
+  return lines.length ? ['', ...lines] : [];
 }
 
 function buildTurnUsageFlash(usage?: TurnUsageSummary): string | undefined {
@@ -326,6 +383,7 @@ export function buildStatusPresentation(snapshot: TtlSnapshot, now = Date.now())
       tooltip: [
         ...tooltipLines,
         vscode.l10n.t('Status: waiting for an active Claude session'),
+        ...buildRateLimitTooltipLines(snapshot, now),
       ].join('\n'),
       visualState: 'countdown',
     };
@@ -340,6 +398,7 @@ export function buildStatusPresentation(snapshot: TtlSnapshot, now = Date.now())
   const awaitingLine = snapshot.awaitingAssistantTurn
     ? vscode.l10n.t('Generating...')
     : undefined;
+  const usageHigh = (highestUsagePercent(snapshot) ?? 0) >= HIGH_USAGE_THRESHOLD;
   const visualState: StatusVisualState = expired
     ? 'expired'
     : hasFrequentResetWarning(snapshot)
@@ -347,14 +406,14 @@ export function buildStatusPresentation(snapshot: TtlSnapshot, now = Date.now())
       : snapshot.rollingState === 'turn_usage'
         ? 'turn_usage'
         : snapshot.rollingState === 'rate_limit' && hasRateLimitData(snapshot.rateLimits)
-          ? 'rate_limit'
+          ? (usageHigh ? 'rate_limit_high' : 'rate_limit')
           : 'countdown';
   const turnUsageFlash = buildTurnUsageFlash(snapshot.lastCompletedTurn);
   const rateLimitFlash = buildRateLimitFlash(snapshot);
 
   const text = visualState === 'turn_usage' && turnUsageFlash
     ? `$(pulse) ${turnUsageFlash}`
-    : visualState === 'rate_limit' && rateLimitFlash
+    : (visualState === 'rate_limit' || visualState === 'rate_limit_high') && rateLimitFlash
       ? `$(dashboard) ${rateLimitFlash}`
       : visualState === 'warning'
         ? `$(warning) ${vscode.l10n.t('TTL {0}', formatRemaining(remainingMs))}${projectSuffix}`
@@ -371,7 +430,7 @@ export function buildStatusPresentation(snapshot: TtlSnapshot, now = Date.now())
       ...buildUsageLines(snapshot.lastCompletedTurn),
       ...buildHealthLines(snapshot),
       ...buildRhythmLines(snapshot),
-      ...buildRateLimitTooltipLines(snapshot),
+      ...buildRateLimitTooltipLines(snapshot, now),
       ...(awaitingLine ? [awaitingLine] : []),
       ...(recommendationLine ? ['', recommendationLine] : []),
       vscode.l10n.t('Ask Claude: run /ttl-advisor in Claude Code for a personalized explanation.'),

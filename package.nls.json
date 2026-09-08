@@ -1,6 +1,11 @@
 {
   "extension.displayName": "Claude TTL Counter",
-  "extension.description": "Live prompt-cache TTL countdown for Claude Code. Keeps the cache warm so TTL expiry doesn't burn your usage limit, and recommends 5m vs 1h from your real turn rhythm.",
+  "extension.description": "Live prompt-cache TTL countdown for Claude Code. Keeps the cache warm so TTL expiry doesn't burn your usage limit, shows your real 5h/7d subscription usage, and recommends 5m vs 1h from your real turn rhythm.",
   "command.toggleMode.title": "Claude TTL: Toggle cache mode",
-  "command.installAdvisorSkill.title": "Claude TTL: Install /ttl-advisor skill (ask Claude)"
+  "command.installAdvisorSkill.title": "Claude TTL: Install /ttl-advisor skill (ask Claude)",
+  "command.connectSubscriptionUsage.title": "Claude TTL: Connect subscription usage (real 5h/7d)",
+  "command.disconnectSubscriptionUsage.title": "Claude TTL: Disconnect subscription usage",
+  "command.refreshSubscriptionUsage.title": "Claude TTL: Refresh subscription usage now",
+  "config.subscriptionUsage.enabled": "Show real 5h/7d subscription usage. When on, the extension sends one GET request per poll interval to https://api.anthropic.com/api/oauth/usage with the Claude Code login token already stored on this machine (~/.claude/.credentials.json, or the macOS Keychain). Nothing else is sent. Off by default.",
+  "config.subscriptionUsage.pollIntervalSeconds": "How often to refresh subscription usage, in seconds (20-600). A refresh also runs right after each completed turn."
 }

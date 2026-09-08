@@ -3,18 +3,49 @@ import * as vscode from 'vscode';
 import { installAdvisorSkill } from './advisor-skill';
 import { SettingsManager, TtlMode, getModeLabel } from './settings-manager';
 import {
+  HIGH_USAGE_THRESHOLD,
   buildStatusPresentation,
+  formatDurationShort,
   getCacheAnchorAt,
   hasFrequentResetWarning,
   shouldPrioritizeWarning,
 } from './status-model';
 import { StatusBarController } from './status-bar';
+import { SubscriptionUsageClient, loadCredentials } from './subscription-usage';
 import { TtlSnapshot, TtlWatcher } from './ttl-watcher';
 
 const TOGGLE_MODE_COMMAND = 'claudeTtl.toggleMode';
 const INSTALL_ADVISOR_COMMAND = 'claudeTtl.installAdvisorSkill';
+const CONNECT_USAGE_COMMAND = 'claudeTtl.connectSubscriptionUsage';
+const DISCONNECT_USAGE_COMMAND = 'claudeTtl.disconnectSubscriptionUsage';
+const REFRESH_USAGE_COMMAND = 'claudeTtl.refreshSubscriptionUsage';
 const ADVISOR_SLASH_COMMAND = '/ttl-advisor';
+const CONFIG_SECTION = 'claudeTtl';
+const SUBSCRIPTION_ENABLED_KEY = 'subscriptionUsage.enabled';
+const SUBSCRIPTION_INTERVAL_KEY = 'subscriptionUsage.pollIntervalSeconds';
+const SUBSCRIPTION_PROMPT_STATE_KEY = 'claudeTtl.subscriptionUsagePrompt';
+const SUBSCRIPTION_PROMPT_RETRY_MS = 7 * 24 * 60 * 60 * 1000;
 const ROLLING_STEP_MS = 3000;
+
+interface SubscriptionConfig {
+  enabled: boolean;
+  pollIntervalMs: number;
+}
+
+function readSubscriptionConfig(): SubscriptionConfig {
+  const config = vscode.workspace.getConfiguration(CONFIG_SECTION);
+  const seconds = config.get<number>(SUBSCRIPTION_INTERVAL_KEY, 60);
+  return {
+    enabled: config.get<boolean>(SUBSCRIPTION_ENABLED_KEY, false),
+    pollIntervalMs: Math.max(20, Number.isFinite(seconds) ? seconds : 60) * 1000,
+  };
+}
+
+async function writeSubscriptionEnabled(enabled: boolean): Promise<void> {
+  await vscode.workspace
+    .getConfiguration(CONFIG_SECTION)
+    .update(SUBSCRIPTION_ENABLED_KEY, enabled, vscode.ConfigurationTarget.Global);
+}
 
 function getPrimaryWorkspacePath(): string | undefined {
   return vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
@@ -40,15 +71,26 @@ function formatRemainingText(remainingMs?: number): string {
   return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
 }
 
+function formatPercent(value?: number): string {
+  return value === undefined ? '--' : value.toFixed(1);
+}
+
 function buildModeOptionLabel(mode: TtlMode, selected: boolean): string {
   return vscode.l10n.t('{0} {1}', selected ? '$(check)' : '$(circle-outline)', getModeLabel(mode));
 }
 
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
   const settingsManager = new SettingsManager();
+  const extensionVersion = String((context.extension.packageJSON as { version?: string }).version ?? '0.0.0');
+  const subscriptionUsage = new SubscriptionUsageClient({
+    userAgent: `claude-ttl-counter/${extensionVersion}`,
+    pollIntervalMs: readSubscriptionConfig().pollIntervalMs,
+    isEnabled: () => readSubscriptionConfig().enabled,
+  });
   const watcher = new TtlWatcher({
     settingsManager,
     workspacePath: getPrimaryWorkspacePath(),
+    subscriptionUsage,
   });
   const statusBar = new StatusBarController(TOGGLE_MODE_COMMAND);
 
@@ -56,6 +98,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   let expiredNotifiedKey: string | undefined;
   let cacheWarningKey: string | undefined;
   let recommendationNotifiedKey: string | undefined;
+  let highUsageNotifiedKey: string | undefined;
   let lastRolledTurnKey: string | undefined;
   let rollingTimer: NodeJS.Timeout | undefined;
 
@@ -165,6 +208,104 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     }
   };
 
+  const describeUsage = (snapshot: TtlSnapshot): string =>
+    vscode.l10n.t(
+      'Usage refreshed: 5h {0}% | 7d {1}%',
+      formatPercent(snapshot.rateLimits?.fiveHourUsedPercentage),
+      formatPercent(snapshot.rateLimits?.sevenDayUsedPercentage),
+    );
+
+  const connectSubscriptionUsage = async (): Promise<void> => {
+    await writeSubscriptionEnabled(true);
+    await watcher.refreshSubscriptionUsage();
+    render();
+
+    const snapshot = watcher.getSnapshot();
+    if (snapshot.subscription?.status === 'ok' && snapshot.rateLimits?.source === 'subscription') {
+      void vscode.window.showInformationMessage(
+        vscode.l10n.t(
+          'Subscription usage connected: 5h {0}% | 7d {1}%',
+          formatPercent(snapshot.rateLimits.fiveHourUsedPercentage),
+          formatPercent(snapshot.rateLimits.sevenDayUsedPercentage),
+        ),
+      );
+      return;
+    }
+
+    void vscode.window.showWarningMessage(
+      vscode.l10n.t(
+        'Subscription usage is on, but the first fetch failed: {0}. It will retry automatically.',
+        snapshot.subscription?.error ?? snapshot.subscription?.status ?? 'unknown',
+      ),
+    );
+  };
+
+  const disconnectSubscriptionUsage = async (): Promise<void> => {
+    await writeSubscriptionEnabled(false);
+    await watcher.refresh();
+    render();
+    void vscode.window.showInformationMessage(
+      vscode.l10n.t('Subscription usage disconnected. The status bar falls back to the statusline bridge if present.'),
+    );
+  };
+
+  const refreshSubscriptionUsage = async (): Promise<void> => {
+    await watcher.refreshSubscriptionUsage();
+    render();
+
+    const snapshot = watcher.getSnapshot();
+    if (snapshot.subscription?.status === 'ok') {
+      void vscode.window.showInformationMessage(describeUsage(snapshot));
+    } else {
+      void vscode.window.showWarningMessage(
+        vscode.l10n.t('Could not refresh usage: {0}', snapshot.subscription?.error ?? snapshot.subscription?.status ?? 'disabled'),
+      );
+    }
+  };
+
+  const maybeOfferSubscriptionUsage = async (): Promise<void> => {
+    if (readSubscriptionConfig().enabled) {
+      return;
+    }
+
+    const promptState = context.globalState.get<string>(SUBSCRIPTION_PROMPT_STATE_KEY);
+    if (promptState === 'never') {
+      return;
+    }
+
+    if (promptState) {
+      const lastAskedAt = Date.parse(promptState);
+      if (!Number.isNaN(lastAskedAt) && Date.now() - lastAskedAt < SUBSCRIPTION_PROMPT_RETRY_MS) {
+        return;
+      }
+    }
+
+    const lookup = await loadCredentials();
+    if (!lookup.credentials) {
+      return;
+    }
+
+    await context.globalState.update(SUBSCRIPTION_PROMPT_STATE_KEY, new Date().toISOString());
+
+    const connectLabel = vscode.l10n.t('Connect');
+    const laterLabel = vscode.l10n.t('Not now');
+    const neverLabel = vscode.l10n.t('Never');
+    const choice = await vscode.window.showInformationMessage(
+      vscode.l10n.t(
+        'Show your real 5h/7d subscription usage in the status bar? This sends one request about every minute to api.anthropic.com/api/oauth/usage with the Claude Code login token already stored on this machine. Nothing else is sent, and you can turn it off anytime in settings.',
+      ),
+      connectLabel,
+      laterLabel,
+      neverLabel,
+    );
+
+    if (choice === connectLabel) {
+      await connectSubscriptionUsage();
+    } else if (choice === neverLabel) {
+      await context.globalState.update(SUBSCRIPTION_PROMPT_STATE_KEY, 'never');
+    }
+  };
+
   const applyMode = async (mode: TtlMode): Promise<void> => {
     await settingsManager.setMode(mode);
     await watcher.refresh();
@@ -216,7 +357,44 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     });
   };
 
+  const maybeNotifyHighUsage = (snapshot: TtlSnapshot): void => {
+    const limits = snapshot.rateLimits;
+    if (!limits) {
+      return;
+    }
+
+    const now = Date.now();
+    const candidates: Array<{ kind: '5h' | '7d'; percent?: number; resetsAt?: number }> = [
+      { kind: '5h', percent: limits.fiveHourUsedPercentage, resetsAt: limits.fiveHourResetsAt },
+      { kind: '7d', percent: limits.sevenDayUsedPercentage, resetsAt: limits.sevenDayResetsAt },
+    ];
+
+    for (const candidate of candidates) {
+      if (candidate.percent === undefined || candidate.percent < HIGH_USAGE_THRESHOLD) {
+        continue;
+      }
+
+      const key = `${candidate.kind}:${candidate.resetsAt ?? 'unknown'}`;
+      if (highUsageNotifiedKey === key) {
+        return;
+      }
+
+      highUsageNotifiedKey = key;
+      const resetText = candidate.resetsAt !== undefined && candidate.resetsAt > now
+        ? formatDurationShort(candidate.resetsAt - now)
+        : '--';
+      void vscode.window.showWarningMessage(
+        candidate.kind === '5h'
+          ? vscode.l10n.t('5h usage at {0}%. Resets in {1}.', formatPercent(candidate.percent), resetText)
+          : vscode.l10n.t('7d usage at {0}%. Resets in {1}.', formatPercent(candidate.percent), resetText),
+      );
+      return;
+    }
+  };
+
   const maybeNotify = (snapshot: TtlSnapshot): void => {
+    maybeNotifyHighUsage(snapshot);
+
     const remainingMs = getRemainingMs(snapshot);
     const anchor = getCacheAnchorAt(snapshot);
     if (remainingMs === undefined || !snapshot.sessionId || !anchor) {
@@ -286,8 +464,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     const currentMode = await settingsManager.getMode();
     const snapshot = watcher.getSnapshot();
     const remainingText = formatRemainingText(getRemainingMs(snapshot));
+    const subscriptionEnabled = readSubscriptionConfig().enabled;
 
-    const options: Array<vscode.QuickPickItem & { mode?: TtlMode; action?: 'advisor' }> = [
+    type Action = 'advisor' | 'connect' | 'disconnect' | 'refresh';
+    const options: Array<vscode.QuickPickItem & { mode?: TtlMode; action?: Action }> = [
       {
         label: buildModeOptionLabel('1h', currentMode === '1h'),
         description: currentMode === '1h'
@@ -309,6 +489,28 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       },
     ];
 
+    if (subscriptionEnabled) {
+      options.push(
+        {
+          label: `$(dashboard) ${vscode.l10n.t('Refresh usage now')}`,
+          description: snapshot.rateLimits?.source === 'subscription'
+            ? `5h ${formatPercent(snapshot.rateLimits.fiveHourUsedPercentage)}% | 7d ${formatPercent(snapshot.rateLimits.sevenDayUsedPercentage)}%`
+            : undefined,
+          action: 'refresh',
+        },
+        {
+          label: `$(debug-disconnect) ${vscode.l10n.t('Disconnect subscription usage')}`,
+          action: 'disconnect',
+        },
+      );
+    } else {
+      options.push({
+        label: `$(plug) ${vscode.l10n.t('Connect subscription usage (real 5h/7d)')}`,
+        description: vscode.l10n.t('One request per minute to api.anthropic.com with the Claude login already on this machine'),
+        action: 'connect',
+      });
+    }
+
     const selected = await vscode.window.showQuickPick(options, {
       placeHolder: vscode.l10n.t('Claude TTL | {0} | {1}', getModeLabel(currentMode), remainingText),
     });
@@ -317,9 +519,21 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       return;
     }
 
-    if (selected.action === 'advisor') {
-      await installAdvisor();
-      return;
+    switch (selected.action) {
+      case 'advisor':
+        await installAdvisor();
+        return;
+      case 'connect':
+        await connectSubscriptionUsage();
+        return;
+      case 'disconnect':
+        await disconnectSubscriptionUsage();
+        return;
+      case 'refresh':
+        await refreshSubscriptionUsage();
+        return;
+      default:
+        break;
     }
 
     if (!selected.mode || selected.mode === currentMode) {
@@ -330,6 +544,18 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   });
 
   const installAdvisorDisposable = vscode.commands.registerCommand(INSTALL_ADVISOR_COMMAND, installAdvisor);
+  const connectUsageDisposable = vscode.commands.registerCommand(CONNECT_USAGE_COMMAND, connectSubscriptionUsage);
+  const disconnectUsageDisposable = vscode.commands.registerCommand(DISCONNECT_USAGE_COMMAND, disconnectSubscriptionUsage);
+  const refreshUsageDisposable = vscode.commands.registerCommand(REFRESH_USAGE_COMMAND, refreshSubscriptionUsage);
+
+  const configurationDisposable = vscode.workspace.onDidChangeConfiguration((event) => {
+    if (!event.affectsConfiguration(CONFIG_SECTION)) {
+      return;
+    }
+
+    subscriptionUsage.setPollInterval(readSubscriptionConfig().pollIntervalMs);
+    void watcher.refresh().then(() => render());
+  });
 
   const workspaceDisposable = vscode.workspace.onDidChangeWorkspaceFolders(() => {
     watcher.setWorkspacePath(getPrimaryWorkspacePath());
@@ -343,6 +569,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   context.subscriptions.push(
     toggleModeDisposable,
     installAdvisorDisposable,
+    connectUsageDisposable,
+    disconnectUsageDisposable,
+    refreshUsageDisposable,
+    configurationDisposable,
     workspaceDisposable,
     {
       dispose: () => clearInterval(renderInterval),
@@ -357,6 +587,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       dispose: () => statusBar.dispose(),
     },
   );
+
+  void maybeOfferSubscriptionUsage();
 }
 
 export function deactivate(): void {

@@ -12,7 +12,8 @@
 - [Claude에게 물어보기: /ttl-advisor](#claude에게-물어보기-ttl-advisor)
 - [프로젝트별 TTL 설정](#프로젝트별-ttl-설정)
 - [롤링 상태 바](#롤링-상태-바)
-- [사용률 브릿지 설정](#사용률-브릿지-설정)
+- [구독 사용량 (5h / 7d)](#구독-사용량-5h--7d)
+- [사용률 브릿지 설정 (폴백)](#사용률-브릿지-설정-폴백)
 
 ---
 
@@ -176,18 +177,51 @@ node ~/.claude/skills/ttl-advisor/analyze-transcripts.js --json          # 스�
 [4] TTL 42:09          ← 복귀: 카운트다운
 ```
 
-- bridge가 연결 안 돼 있으면 3단계를 건너뛰어요
+- 구독 사용량도 브릿지도 연결 안 돼 있으면 3단계를 건너뛰어요
+- 어느 한 창이 90% 이상이면 3단계가 빨간 배경으로 떠요
 - 캐시 리셋 경고가 활성 상태면 롤링이 멈춰요
 
 ---
 
-## 사용률 브릿지 설정
+## 구독 사용량 (5h / 7d)
 
-5h/7d 사용률 표시는 bridge가 필요해요.
+Claude Code IDE 확장은 5시간·주간 사용률을 로컬에 남기지 않아요. 그래서 이 확장은 CLI의 `/usage`와 같은 방식으로 Anthropic에 직접 물어봐요: 이 PC에 이미 저장된 Claude Code 로그인 토큰(`~/.claude/.credentials.json`, macOS는 Keychain)으로 `GET https://api.anthropic.com/api/oauth/usage` 를 호출해요.
+
+### 연결하기
+
+- 처음 실행할 때 뜨는 질문에 **연결**, **또는**
+- 상태 바 클릭 → **구독 사용량 연결 (실제 5h/7d)**, **또는**
+- 커맨드 팔레트에서 *Claude TTL: 구독 사용량 연결*, **또는**
+- VS Code 설정에 `"claudeTtl.subscriptionUsage.enabled": true`
+
+기본은 꺼짐이에요. 이 확장의 유일한 네트워크 호출이고, `claudeTtl.subscriptionUsage.pollIntervalSeconds`(기본 60초, 최소 20초)마다 한 번 + 턴이 끝나고 약 1.5초 뒤 한 번 보내요. 턴이 끝난 직후 조회하니까 롤링 표시에 그 턴의 비용이 떠요. 토큰 헤더만, `api.anthropic.com`에만 보내요. 토큰을 갱신하거나 쓰지 않아요.
+
+### 보이는 것
+
+- 롤링 표시: `5시간 22.0% (+0.4%) | 7일 23.0%` — 증가분은 이번 턴 뒤 조회값과 이전 턴 뒤 조회값의 차이예요
+- 툴팁: `5시간 사용량: 22.0% | 1.2h 후 리셋`, `7일 사용량: 23.0% | 5.8d 후 리셋`, 모델별 `7일 Fable: 41%`, `사용량 출처: 구독 (max) | 12s 전 갱신`
+- 5시간 또는 7일이 90%를 넘으면 리셋 창당 한 번 경고
+- transcript에 거절 기록이 있으면 `07:22에 한도 도달 (five_hour) | 38m 후 리셋`
+
+### 문제 해결
+
+| 툴팁 문구 | 뜻 | 해결 |
+|---|---|---|
+| `구독 사용량: 연결 안 됨` | 기능이 꺼져 있음 | 상태 바 메뉴에서 연결 |
+| `Claude Code가 로그인을 갱신하길 기다리는 중` | 저장된 토큰이 만료됨 | Claude Code에서 아무 프롬프트나 보내면 토큰이 갱신되고, 확장은 1분 안에 다시 시도해요 |
+| `이 PC에서 Claude Code 로그인을 찾지 못했어요` | `.credentials.json` / Keychain에 `claudeAiOauth`가 없음 (API 키 사용자, 또는 로그아웃 상태) | Claude Code에서 구독 계정으로 `/login` |
+| `잠시 조회할 수 없어요 (HTTP 429)` | 서버가 잠시 쉬라고 함 | 할 일 없음. retry-after 뒤에 자동 재개 |
+| `잠시 조회할 수 없어요 (HTTP 401)` | 토큰 거부됨 | Claude Code에서 다시 로그인. 10분 뒤 자동 재시도 |
+
+---
+
+## 사용률 브릿지 설정 (폴백)
+
+v0.7 전에는 Claude Code statusline 출력을 로컬 JSON 파일에 써주는 bridge가 유일한 출처였어요. 지금도 동작하고, 브릿지 파일이 마지막 구독 조회보다 최신이면 그 값을 써요. 확장에서 네트워크 호출을 아예 안 하고 싶고 터미널 CLI를 쓴다면 이 방식이 맞아요.
 
 ### 작동 방식
 
-1. Claude Code가 statusline을 통해 rate limit 정보를 출력
+1. Claude Code가 statusline을 통해 rate limit 정보를 출력 (터미널 CLI만)
 2. `bridge/write-rate-limits.js`가 읽어서 `~/.claude/ttl-counter-rate-limits.json`에 기록
 3. 확장이 3초마다 그 파일을 읽음
 

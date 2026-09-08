@@ -1,5 +1,7 @@
 import * as fs from 'node:fs/promises';
 
+import { SubscriptionUsage } from './subscription-usage';
+
 interface RawRateLimitWindow {
   used_percentage?: unknown;
   usedPercentage?: unknown;
@@ -23,14 +25,26 @@ interface RawRateLimitPayload {
   rateLimits?: RawRateLimits;
 }
 
+export type RateLimitSource = 'statusline' | 'subscription';
+
+export interface RateLimitScopedWindow {
+  label: string;
+  usedPercentage: number;
+  resetsAt?: number;
+  isActive?: boolean;
+}
+
 export interface RateLimitSummary {
+  source: RateLimitSource;
   sessionId?: string;
   updatedAt?: number;
-  sourcePath: string;
+  sourcePath?: string;
   fiveHourUsedPercentage?: number;
   fiveHourResetsAt?: number;
   sevenDayUsedPercentage?: number;
   sevenDayResetsAt?: number;
+  scoped?: RateLimitScopedWindow[];
+  subscriptionType?: string;
 }
 
 function toFiniteNumber(value: unknown): number | undefined {
@@ -41,7 +55,8 @@ function toFiniteNumber(value: unknown): number | undefined {
 
 function toTimestamp(value: unknown): number | undefined {
   if (typeof value === 'number' && Number.isFinite(value)) {
-    return value;
+    // Claude Code's statusline payload uses unix seconds; accept milliseconds too.
+    return value < 1e12 ? value * 1000 : value;
   }
 
   if (typeof value === 'string' && value.trim()) {
@@ -76,6 +91,7 @@ function parseRateLimitPayload(
   const sevenDay = getRawWindow(rateLimits, 'seven_day', 'sevenDay');
 
   return {
+    source: 'statusline',
     sessionId: toStringValue(parsed.session_id ?? parsed.sessionId),
     updatedAt: toFiniteNumber(parsed.updated_at ?? parsed.updatedAt) ?? updatedAt,
     sourcePath,
@@ -91,6 +107,44 @@ export function hasRateLimitData(summary?: RateLimitSummary): boolean {
     || summary?.sevenDayUsedPercentage !== undefined;
 }
 
+/** Converts a live subscription usage sample into the summary shape the UI renders. */
+export function subscriptionUsageToSummary(
+  usage: SubscriptionUsage,
+  subscriptionType?: string,
+): RateLimitSummary {
+  return {
+    source: 'subscription',
+    updatedAt: usage.fetchedAt,
+    fiveHourUsedPercentage: usage.fiveHour?.percent,
+    fiveHourResetsAt: usage.fiveHour?.resetsAt,
+    sevenDayUsedPercentage: usage.sevenDay?.percent,
+    sevenDayResetsAt: usage.sevenDay?.resetsAt,
+    scoped: usage.scoped.map((limit) => ({
+      label: limit.label,
+      usedPercentage: limit.percent,
+      resetsAt: limit.resetsAt,
+      isActive: limit.isActive,
+    })),
+    subscriptionType,
+  };
+}
+
+/** Picks the fresher of two summaries; the subscription source wins ties. */
+export function pickFreshestRateLimits(
+  subscription?: RateLimitSummary,
+  statusline?: RateLimitSummary,
+): RateLimitSummary | undefined {
+  if (!hasRateLimitData(subscription)) {
+    return hasRateLimitData(statusline) ? statusline : undefined;
+  }
+
+  if (!hasRateLimitData(statusline)) {
+    return subscription;
+  }
+
+  return (statusline?.updatedAt ?? 0) > (subscription?.updatedAt ?? 0) ? statusline : subscription;
+}
+
 export async function readRateLimitSummary(
   bridgePath: string,
   expectedSessionId?: string,
@@ -102,12 +156,7 @@ export async function readRateLimitSummary(
     const stat = await fs.stat(bridgePath);
     updatedAt = Number.isFinite(stat.mtimeMs) ? stat.mtimeMs : undefined;
     raw = await fs.readFile(bridgePath, 'utf8');
-  } catch (error) {
-    const nodeError = error as NodeJS.ErrnoException;
-    if (nodeError.code === 'ENOENT') {
-      return undefined;
-    }
-
+  } catch {
     return undefined;
   }
 
