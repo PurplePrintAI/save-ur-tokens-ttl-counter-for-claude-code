@@ -4,6 +4,8 @@
 
 > Keep the prompt cache warm, so a TTL expiry doesn't rebuild your whole context and eat your 5-hour / weekly usage limit.
 
+> **Latest: v0.7.0** — real 5h / 7d subscription usage inside VS Code and Cursor, a cost-simulation recommendation, and the `/ttl-advisor` skill. Version history in [CHANGELOG.md](./CHANGELOG.md).
+
 > **Renamed from "Save ur tokens!"** — the old name was slightly wrong. This extension doesn't reduce the tokens you send. It stops the cache TTL from expiring unnoticed, and with it the full cache rebuild that burns your *subscription usage limit*. Same tool, more honest name. (The GitHub repo was renamed too; old links redirect.)
 
 **"I barely used it today, but my daily limit is already gone."** *(Claude Code has a 5-hour rolling usage limit — in practice, it feels like a daily limit.)* If that sounds familiar, it's probably not the model — it's an invisible cache setting that doesn't match how you actually work. Claude Code has a prompt cache that reuses previous context, but the default time-to-live (TTL) for that cache is set to just **5 minutes** (this was [silently changed](https://www.reddit.com/r/ClaudeCode/comments/1sk3iyq/followup_anthropic_quietly_switched_the_default/) recently). That means if more than 5 minutes pass after the last request in your session (your prompt, or the last tool call inside a turn), all the cached context resets — and the next request has to rebuild it from scratch at the cache-write price. The more context you've accumulated (conversation history, files read, tool calls), the bigger the rebuild. That's why your usage limit can suddenly drop even though you barely sent anything — it's not you using more, it's the cache silently expiring and being rebuilt.
@@ -13,7 +15,7 @@
 > - **Idle gaps often 5–60 min** → switch to `1h`. Otherwise the cache silently resets between turns and your limit drops fast without you knowing why.
 > - **Not sure?** Hover the status bar: the extension replays your recent turns under both settings and tells you which one would have cost less. Or run `/ttl-advisor` in Claude Code and let your own agent explain it.
 
-**This extension shows a live countdown of your cache timer right in the status bar — so you always know how much time you have.** No more wondering "has it expired yet?" while you're reading code or thinking about your next prompt. It also replays your real turn history under both TTL settings and recommends the cheaper one. Follow the recommendation, change one setting, and stop losing usage limit to resets you didn't even know were happening.
+**This extension shows a live countdown of your cache timer right in the status bar — so you always know how much time you have.** No more wondering "has it expired yet?" while you're reading code or thinking about your next prompt. It also replays your real turn history under both TTL settings and recommends the cheaper one, and — once you connect your subscription — flashes your real 5-hour / 7-day usage after every turn so you can see what each turn actually cost. Follow the recommendation, change one setting, and stop losing usage limit to resets you didn't even know were happening.
 
 I built this because I kept hitting the daily limit without understanding why. After switching to the right cache setting and using this counter, cache resets went from 5–6 times a day down to 1–2. I stopped rushing my prompts, started reading agent output carefully, and got better results with fewer turns. I hope this helps you waste less of your usage limit, worry less, and enjoy working with your agent a little more.
 
@@ -221,7 +223,8 @@ curl -L https://github.com/PurplePrintAI/save-ur-usage-limit-ttl-counter-for-cla
 2. Open the same workspace you use with Claude Code
 3. Look for the countdown in the bottom status bar
 4. Click to switch between `5m` and `1h`
-5. Hover to inspect cache metrics
+5. Hover to inspect cache metrics and the recommendation
+6. Optional: click → **Connect subscription usage** to see your real 5h / 7d usage after every turn (see [Real subscription usage](#real-subscription-usage-5h--7d))
 
 For a detailed guide, see [HOW-TO-USE.md](./HOW-TO-USE.md).
 
@@ -252,7 +255,7 @@ node ~/.claude/skills/ttl-advisor/analyze-transcripts.js --all --json
 
 ## Development
 
-Contributions and forks are welcome. This is a small, focused project — the core logic is in seven TypeScript files. `src/transcript-tracker.ts` and `src/recommendation.ts` have no `vscode` dependency, so you can exercise them with plain node.
+Contributions and forks are welcome. This is a small, focused project — the core logic is in ten TypeScript files under `src/`. `transcript-tracker.ts` (turn reconstruction), `recommendation.ts` (cost simulation), and `subscription-usage.ts` (usage endpoint client) have no `vscode` dependency, so you can exercise them with plain node. Version history: [CHANGELOG.md](./CHANGELOG.md).
 
 **Help improve the recommendation logic**: The engine is a counterfactual cost simulation (see [How the recommendation works](#how-the-recommendation-works)). Run `node bridge/analyze-transcripts.js --all` on your own machine and tell us whether the verdict matches your experience — see **[Issue #1: RFC — Recommendation logic](https://github.com/PurplePrintAI/save-ur-usage-limit-ttl-counter-for-claude-code/issues/1)**.
 

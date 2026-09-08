@@ -46,6 +46,17 @@ Hover over the status bar to see:
 - Rhythm: idle gap median and p75 over the last 30 turns, and how many tokens TTL-expiry rebuilds cost
 - The recommendation: *"Tip: 1h mode would have cost about 27% less over your last 30 turns"*, or *"Mode check"* when you're already on the cheaper setting
 
+### 3. Usage flash (after each turn)
+
+Right after a turn completes the status bar briefly shows what it cost, then returns to the countdown:
+
+```text
+$(pulse) 84k in | hit 82% | 1.3k out          ← this turn's tokens and cache hit ratio
+$(dashboard) 5h 22.0% (+0.4%) | 7d 23.0%      ← your real subscription usage and this turn's share
+```
+
+The second line needs [subscription usage](#subscription-usage-5h--7d) connected (or the statusline bridge). It turns red when a window is at 90% or more.
+
 ---
 
 ## How to read the numbers

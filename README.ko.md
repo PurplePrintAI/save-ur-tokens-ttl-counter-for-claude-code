@@ -4,6 +4,8 @@
 
 > 프롬프트 캐시를 따뜻하게 유지해서, TTL 만료로 컨텍스트 전체가 다시 캐싱되며 5시간/7일 사용량 한도가 녹는 걸 막아요.
 
+> **최신: v0.7.0** — VS Code·Cursor 안에서 실제 5h / 7d 구독 사용량 표시, 비용 시뮬레이션 추천, `/ttl-advisor` 스킬. 버전 이력은 [CHANGELOG.md](./CHANGELOG.md)에 있어요.
+
 > **"Save ur tokens!"에서 이름을 바꿨어요.** 예전 이름은 조금 틀렸어요. 이 확장은 내가 보내는 토큰을 줄여주는 게 아니에요. 캐시 TTL이 모르는 사이에 만료되는 걸 막고, 그래서 컨텍스트 전체를 다시 캐싱하며 *구독 사용량 한도*가 녹는 걸 막아요. 같은 도구, 더 솔직한 이름이에요. (GitHub 레포 이름도 같이 바꿨어요. 예전 링크는 자동으로 넘어가요.)
 
 **"오늘 거의 안 썼는데 일간 리밋이 왜 벌써 없지?"** *(Claude Code는 5시간 롤링 사용량 제한이 있어요 — 체감상 일간 리밋이에요.)* 이 느낌이 익숙하다면, 모델이 비싼 게 아니라 보이지 않는 캐시 설정이 작업 방식과 안 맞아서일 가능성이 높아요. Claude Code에는 이전 맥락을 재활용하는 프롬프트 캐시가 있는데, 이 캐시가 살아있는 시간(TTL) 기본값이 **5분**으로 설정되어 있어요 ([최근에 잠수함 패치됐었어요](https://www.reddit.com/r/ClaudeCode/comments/1sk3iyq/followup_anthropic_quietly_switched_the_default/)). 마지막 요청(내 프롬프트, 또는 턴 안의 마지막 도구 호출)으로부터 5분이 지나면 캐시가 사라지고, 다음 요청은 컨텍스트 전체를 캐시 쓰기 가격으로 처음부터 다시 만들어요. 그게 사용량 한도가 갑자기 뚝 떨어지는 이유예요.
@@ -13,7 +15,7 @@
 > - **대기 간격이 5~60분인 경우가 많다** → `1시간`으로 변경. 안 바꾸면 캐시가 조용히 리셋되면서 한도가 급감해요.
 > - **잘 모르겠다면** 상태 바에 마우스를 올려보세요. 최근 턴을 두 설정으로 다시 계산해서 어느 쪽이 덜 들었을지 알려줘요. Claude Code에서 `/ttl-advisor`를 치면 내 에이전트가 직접 설명해줘요.
 
-**이 확장은 캐시 만료까지 남은 시간을 상태 바에서 실시간 카운트다운으로 보여줘요.** 실제 턴 기록을 두 TTL 설정으로 다시 계산해서 더 저렴한 쪽을 추천해요. 추천에 따라 설정 하나만 바꾸면, 모르는 사이에 캐시가 리셋되면서 사용량 한도가 새는 걸 막을 수 있어요.
+**이 확장은 캐시 만료까지 남은 시간을 상태 바에서 실시간 카운트다운으로 보여줘요.** 실제 턴 기록을 두 TTL 설정으로 다시 계산해서 더 저렴한 쪽을 추천하고, 구독을 연결하면 매 턴이 끝날 때마다 실제 5시간 / 7일 사용량을 보여줘서 그 턴이 얼마나 들었는지 바로 알 수 있어요. 추천에 따라 설정 하나만 바꾸면, 모르는 사이에 캐시가 리셋되면서 사용량 한도가 새는 걸 막을 수 있어요.
 
 저도 일간 리밋에 왜 자꾸 걸리는지 모르겠어서 만들었어요. 캐시 리셋이 하루 5–6번에서 1–2번으로 줄었고, 더 적은 턴으로 더 좋은 결과를 얻게 됐어요.
 
@@ -152,6 +154,7 @@ VS Code 또는 Cursor를 자동 감지하고 최신 버전을 설치해요.
 3. 하단 상태 바에서 카운트다운 확인
 4. 클릭해서 5분 ↔ 1시간 전환
 5. 마우스 올려서 캐시 지표와 추천 확인
+6. 선택: 클릭 → **구독 사용량 연결**을 누르면 매 턴 뒤 실제 5h / 7d 사용량이 떠요 ([실제 구독 사용량](#실제-구독-사용량-5h--7d) 참고)
 
 더 자세한 가이드: [HOW-TO-USE.ko.md](./HOW-TO-USE.ko.md)
 
@@ -189,7 +192,7 @@ node ~/.claude/skills/ttl-advisor/analyze-transcripts.js --all --json
 
 ## 개발
 
-기여와 포크 환영. 핵심 로직은 TypeScript 파일 7개예요. `src/transcript-tracker.ts`와 `src/recommendation.ts`는 `vscode` 의존성이 없어서 node만으로 돌려볼 수 있어요. **[Issue #1: RFC — Recommendation logic](https://github.com/PurplePrintAI/save-ur-usage-limit-ttl-counter-for-claude-code/issues/1)**에서 추천 로직 피드백을 모아요. `node bridge/analyze-transcripts.js --all`을 돌려보고 결과가 체감과 맞는지 알려주세요.
+기여와 포크 환영. 핵심 로직은 `src/` 아래 TypeScript 파일 10개예요. `transcript-tracker.ts`(턴 재구성), `recommendation.ts`(비용 시뮬레이션), `subscription-usage.ts`(사용량 엔드포인트 클라이언트)는 `vscode` 의존성이 없어서 node만으로 돌려볼 수 있어요. 버전 이력은 [CHANGELOG.md](./CHANGELOG.md)에 있어요. **[Issue #1: RFC — Recommendation logic](https://github.com/PurplePrintAI/save-ur-usage-limit-ttl-counter-for-claude-code/issues/1)**에서 추천 로직 피드백을 모아요. `node bridge/analyze-transcripts.js --all`을 돌려보고 결과가 체감과 맞는지 알려주세요.
 
 ## 개인정보
 
