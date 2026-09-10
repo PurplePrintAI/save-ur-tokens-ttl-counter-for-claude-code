@@ -4,7 +4,7 @@
 
 > Keep the prompt cache warm, so a TTL expiry doesn't rebuild your whole context and eat your 5-hour / weekly usage limit.
 
-> **Latest: v0.8.0** — a universal CLI statusline (`bridge/statusline.js`) you can wire into Claude Code, or show in any terminal (Codex CLI, others) via tmux. v0.7 added real 5h / 7d subscription usage inside VS Code and Cursor. Version history in [CHANGELOG.md](./CHANGELOG.md).
+> **Latest: v0.8.1** — a universal CLI statusline (`bridge/statusline.js`) you can wire into Claude Code, or show in any terminal (Codex CLI, others) via tmux. v0.7 added real 5h / 7d subscription usage inside VS Code and Cursor. Version history in [CHANGELOG.md](./CHANGELOG.md).
 
 > **Renamed from "Save ur tokens!"** — the old name was slightly wrong. This extension doesn't reduce the tokens you send. It stops the cache TTL from expiring unnoticed, and with it the full cache rebuild that burns your *subscription usage limit*. Same tool, more honest name. (The GitHub repo was renamed too; old links redirect.)
 
@@ -208,10 +208,10 @@ Automatically detects VS Code or Cursor and installs the latest version.
 
 ```bash
 # VS Code
-curl -L https://github.com/PurplePrintAI/save-ur-usage-limit-ttl-counter-for-claude-code/releases/latest/download/claude-ttl-counter-0.8.0.vsix -o /tmp/ttl.vsix && code --install-extension /tmp/ttl.vsix
+curl -L https://github.com/PurplePrintAI/save-ur-usage-limit-ttl-counter-for-claude-code/releases/latest/download/claude-ttl-counter-0.8.1.vsix -o /tmp/ttl.vsix && code --install-extension /tmp/ttl.vsix
 
 # Cursor
-curl -L https://github.com/PurplePrintAI/save-ur-usage-limit-ttl-counter-for-claude-code/releases/latest/download/claude-ttl-counter-0.8.0.vsix -o /tmp/ttl.vsix && cursor --install-extension /tmp/ttl.vsix
+curl -L https://github.com/PurplePrintAI/save-ur-usage-limit-ttl-counter-for-claude-code/releases/latest/download/claude-ttl-counter-0.8.1.vsix -o /tmp/ttl.vsix && cursor --install-extension /tmp/ttl.vsix
 ```
 
 ### Option 3: From IDE

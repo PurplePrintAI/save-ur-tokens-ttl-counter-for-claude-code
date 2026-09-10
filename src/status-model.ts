@@ -79,6 +79,24 @@ export function formatDurationShort(ms?: number): string {
   return `${compactNumberFormatter.format(minutes / 60)}h`;
 }
 
+/**
+ * Coarse reset countdown for notifications: whole hours (for the 5h window) up to 2 days, then
+ * whole days (for the 7d window). Rounds up, so "2h50m left" reads "~3h". Kept deliberately coarse
+ * so the popup is stable and legible, unlike the minute-precise tooltip.
+ */
+export function formatResetCoarse(ms?: number): string {
+  if (ms === undefined || !Number.isFinite(ms) || ms <= 0) {
+    return vscode.l10n.t('soon');
+  }
+
+  const hours = ms / (60 * 60 * 1000);
+  if (hours < 24) {
+    return vscode.l10n.t('~{0}h', String(Math.max(1, Math.ceil(hours))));
+  }
+
+  return vscode.l10n.t('~{0}d', String(Math.ceil(hours / 24)));
+}
+
 function projectName(workspacePath?: string): string {
   return workspacePath ? path.basename(workspacePath) : '';
 }

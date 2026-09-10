@@ -4,6 +4,18 @@ All notable changes to Claude TTL Counter.
 
 ---
 
+## [0.8.1] — 2026-09-10
+
+### Fixed
+
+- **High-usage warning fired repeatedly.** The `/api/oauth/usage` endpoint returns `resets_at` with jittering sub-second precision, so keying the "once per reset window" dedup on the exact value produced a new key on every poll and re-popped the warning. The dedup key is now bucketed to the hour, and 5h and 7d dedup independently, so you get one warning per window.
+
+### Changed
+
+- **Reset countdown in the warning is now coarse and hour-based** (`Resets in ~2h`, `~5h`, or `~3d`) instead of minute precision (`10.0m`, `3.8h`). The hover tooltip and statusline keep their finer detail.
+
+---
+
 ## [0.8.0] — 2026-09-10
 
 ### Added

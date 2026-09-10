@@ -5,7 +5,7 @@ import { SettingsManager, TtlMode, getModeLabel } from './settings-manager';
 import {
   HIGH_USAGE_THRESHOLD,
   buildStatusPresentation,
-  formatDurationShort,
+  formatResetCoarse,
   getCacheAnchorAt,
   hasFrequentResetWarning,
   shouldPrioritizeWarning,
@@ -98,7 +98,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   let expiredNotifiedKey: string | undefined;
   let cacheWarningKey: string | undefined;
   let recommendationNotifiedKey: string | undefined;
-  let highUsageNotifiedKey: string | undefined;
+  const highUsageNotified = new Set<string>();
   let lastRolledTurnKey: string | undefined;
   let rollingTimer: NodeJS.Timeout | undefined;
 
@@ -381,15 +381,19 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         continue;
       }
 
-      const key = `${candidate.kind}:${candidate.resetsAt ?? 'unknown'}`;
-      if (highUsageNotifiedKey === key) {
-        return;
+      // Dedup per reset window, bucketed to the hour: the endpoint jitters resets_at by
+      // sub-second amounts between fetches, so keying on the exact value re-fired the warning on
+      // every poll. One warning per kind per reset window.
+      const bucket = candidate.resetsAt !== undefined
+        ? Math.floor(candidate.resetsAt / (60 * 60 * 1000))
+        : `now-${Math.floor(now / (60 * 60 * 1000))}`;
+      const key = `${candidate.kind}:${bucket}`;
+      if (highUsageNotified.has(key)) {
+        continue;
       }
 
-      highUsageNotifiedKey = key;
-      const resetText = candidate.resetsAt !== undefined && candidate.resetsAt > now
-        ? formatDurationShort(candidate.resetsAt - now)
-        : '--';
+      highUsageNotified.add(key);
+      const resetText = formatResetCoarse(candidate.resetsAt !== undefined ? candidate.resetsAt - now : undefined);
       void vscode.window.showWarningMessage(
         candidate.kind === '5h'
           ? vscode.l10n.t('5h usage at {0}%. Resets in {1}.', formatPercent(candidate.percent), resetText)

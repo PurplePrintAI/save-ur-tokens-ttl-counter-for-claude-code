@@ -4,7 +4,7 @@
 
 > 프롬프트 캐시를 따뜻하게 유지해서, TTL 만료로 컨텍스트 전체가 다시 캐싱되며 5시간/7일 사용량 한도가 녹는 걸 막아요.
 
-> **최신: v0.8.0** — 어떤 CLI에서도 쓰는 statusline(`bridge/statusline.js`). Claude Code에는 네이티브로 붙이고, Codex CLI나 그 외 CLI에는 tmux로 띄워요. v0.7은 VS Code·Cursor 안에서 실제 5h / 7d 구독 사용량을 넣었어요. 버전 이력은 [CHANGELOG.md](./CHANGELOG.md)에 있어요.
+> **최신: v0.8.1** — 어떤 CLI에서도 쓰는 statusline(`bridge/statusline.js`). Claude Code에는 네이티브로 붙이고, Codex CLI나 그 외 CLI에는 tmux로 띄워요. v0.7은 VS Code·Cursor 안에서 실제 5h / 7d 구독 사용량을 넣었어요. 버전 이력은 [CHANGELOG.md](./CHANGELOG.md)에 있어요.
 
 > **"Save ur tokens!"에서 이름을 바꿨어요.** 예전 이름은 조금 틀렸어요. 이 확장은 내가 보내는 토큰을 줄여주는 게 아니에요. 캐시 TTL이 모르는 사이에 만료되는 걸 막고, 그래서 컨텍스트 전체를 다시 캐싱하며 *구독 사용량 한도*가 녹는 걸 막아요. 같은 도구, 더 솔직한 이름이에요. (GitHub 레포 이름도 같이 바꿨어요. 예전 링크는 자동으로 넘어가요.)
 
