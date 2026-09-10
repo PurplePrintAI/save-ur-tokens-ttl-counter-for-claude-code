@@ -129,20 +129,69 @@ export function subscriptionUsageToSummary(
   };
 }
 
-/** Picks the fresher of two summaries; the subscription source wins ties. */
+/** A live subscription sample is authoritative for this long before the bridge may override it. */
+const SUBSCRIPTION_AUTHORITATIVE_MS = 5 * 60 * 1000;
+/** The bridge file's self-reported timestamp is trusted only this recent. */
+const BRIDGE_FRESH_MS = 15 * 60 * 1000;
+
+/**
+ * Chooses the usage source. The subscription endpoint is the trusted source: while its sample is
+ * fresh it wins outright, because the bridge file is world-writable (any process, including a
+ * stale statusline, can stamp it with a spuriously fresh `updated_at`) and must not be able to
+ * override a good live sample. The bridge is used only when the subscription is absent or stale,
+ * and then only if the bridge sample itself is recent.
+ */
 export function pickFreshestRateLimits(
   subscription?: RateLimitSummary,
   statusline?: RateLimitSummary,
+  now: number = Date.now(),
 ): RateLimitSummary | undefined {
-  if (!hasRateLimitData(subscription)) {
-    return hasRateLimitData(statusline) ? statusline : undefined;
-  }
-
-  if (!hasRateLimitData(statusline)) {
+  const subFresh = hasRateLimitData(subscription)
+    && now - (subscription?.updatedAt ?? 0) <= SUBSCRIPTION_AUTHORITATIVE_MS;
+  if (subFresh) {
     return subscription;
   }
 
-  return (statusline?.updatedAt ?? 0) > (subscription?.updatedAt ?? 0) ? statusline : subscription;
+  const bridgeFresh = hasRateLimitData(statusline)
+    && now - (statusline?.updatedAt ?? 0) <= BRIDGE_FRESH_MS;
+  if (bridgeFresh) {
+    return statusline;
+  }
+
+  // Neither is fresh: prefer whichever has data, subscription first.
+  if (hasRateLimitData(subscription)) {
+    return subscription;
+  }
+
+  return hasRateLimitData(statusline) ? statusline : undefined;
+}
+
+/**
+ * Drops usage windows whose reset time has already passed (their percentage is stale — the window
+ * has rolled over). Returns undefined when nothing usable remains.
+ */
+export function dropExpiredWindows(
+  summary: RateLimitSummary | undefined,
+  now: number = Date.now(),
+): RateLimitSummary | undefined {
+  if (!summary) {
+    return undefined;
+  }
+
+  const fiveExpired = summary.fiveHourResetsAt !== undefined && summary.fiveHourResetsAt <= now;
+  const sevenExpired = summary.sevenDayResetsAt !== undefined && summary.sevenDayResetsAt <= now;
+
+  const cleaned: RateLimitSummary = {
+    ...summary,
+    fiveHourUsedPercentage: fiveExpired ? undefined : summary.fiveHourUsedPercentage,
+    fiveHourResetsAt: fiveExpired ? undefined : summary.fiveHourResetsAt,
+    sevenDayUsedPercentage: sevenExpired ? undefined : summary.sevenDayUsedPercentage,
+    sevenDayResetsAt: sevenExpired ? undefined : summary.sevenDayResetsAt,
+    scoped: summary.scoped?.filter((limit) => limit.resetsAt === undefined || limit.resetsAt > now),
+  };
+
+  const hasScoped = Boolean(cleaned.scoped && cleaned.scoped.length);
+  return hasRateLimitData(cleaned) || hasScoped ? cleaned : undefined;
 }
 
 export async function readRateLimitSummary(

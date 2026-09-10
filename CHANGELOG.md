@@ -4,6 +4,29 @@ All notable changes to Claude TTL Counter.
 
 ---
 
+## [0.8.0] — 2026-09-10
+
+### Added
+
+- **Universal CLI statusline** (`bridge/statusline.js`) — a zero-dependency Node script that renders the TTL countdown plus 5h/7d usage as one terminal line (`TTL 42:15 · ctx 34% · 5h 22% (1.2h) · 7d 23% (4.6d)`). It is self-sourcing: it tail-reads the active transcript and reads `~/.claude` directly, so it does not depend on the host CLI piping anything.
+  - **Claude Code CLI**: wire it into `settings.json` → `statusLine.command`; the piped session JSON (transcript path, context %, `rate_limits`) enriches it with no network call. It also keeps writing the bridge file, so the VS Code extension stays in sync.
+  - **Codex CLI and other CLIs**: Codex has no custom-command statusline (only a fixed built-in list), so show the line at the terminal level via tmux `status-right` or `watch` — works regardless of which CLI is in front.
+  - `--usage` / `CLAUDE_TTL_USAGE=1`: optional real 5h/7d fetch from `api.anthropic.com/api/oauth/usage` using the stored Claude Code login, refreshed in a detached background process with a 60-second cache so the line never blocks. `--no-color` / `NO_COLOR` supported. `--help` prints wiring examples.
+  - TTL colors run green → yellow → red; a usage window turns red past 90%; windows whose reset already passed are hidden so no stale percentage shows. Always exits 0 and never throws.
+
+### Fixed
+
+- **Wrong 5h usage in the high-usage warning popup** — the source picker trusted the bridge file's self-reported `updated_at`, so a transient or stale bridge sample could override a good live subscription reading and fire a scary, persistent notification whose number no longer matched the (correct) hover tooltip. The live subscription sample is now authoritative while it is fresh; the bridge file is a fallback used only when the subscription is absent or stale, and only when the bridge sample itself is recent
+- **Stale usage windows** — a usage window whose reset time has already passed is now dropped everywhere (tooltip, flash, warning), so a rolled-over percentage never shows
+- The high-usage warning only fires from a sample fresher than 10 minutes
+
+### Notes
+
+- What the line measures is Anthropic-specific (the 5m/1h cache TTL and Claude subscription usage). Non-Anthropic CLIs such as Codex have no equivalent tunable cache TTL; the line reflects your Claude sessions, displayed in whatever terminal you keep open.
+- The extension changes in this release are the usage-source fixes above; the headline addition is the CLI statusline (bundled in the VSIX under `bridge/`).
+
+---
+
 ## [0.7.0] — 2026-09-09
 
 ### Added

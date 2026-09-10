@@ -364,6 +364,13 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     }
 
     const now = Date.now();
+
+    // Only warn from a fresh sample. A stale or transient bridge reading must never pop a scary,
+    // persistent notification that then no longer matches the live tooltip.
+    if (limits.updatedAt !== undefined && now - limits.updatedAt > 10 * 60 * 1000) {
+      return;
+    }
+
     const candidates: Array<{ kind: '5h' | '7d'; percent?: number; resetsAt?: number }> = [
       { kind: '5h', percent: limits.fiveHourUsedPercentage, resetsAt: limits.fiveHourResetsAt },
       { kind: '7d', percent: limits.sevenDayUsedPercentage, resetsAt: limits.sevenDayResetsAt },

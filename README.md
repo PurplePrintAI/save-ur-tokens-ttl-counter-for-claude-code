@@ -4,7 +4,7 @@
 
 > Keep the prompt cache warm, so a TTL expiry doesn't rebuild your whole context and eat your 5-hour / weekly usage limit.
 
-> **Latest: v0.7.0** — real 5h / 7d subscription usage inside VS Code and Cursor, a cost-simulation recommendation, and the `/ttl-advisor` skill. Version history in [CHANGELOG.md](./CHANGELOG.md).
+> **Latest: v0.8.0** — a universal CLI statusline (`bridge/statusline.js`) you can wire into Claude Code, or show in any terminal (Codex CLI, others) via tmux. v0.7 added real 5h / 7d subscription usage inside VS Code and Cursor. Version history in [CHANGELOG.md](./CHANGELOG.md).
 
 > **Renamed from "Save ur tokens!"** — the old name was slightly wrong. This extension doesn't reduce the tokens you send. It stops the cache TTL from expiring unnoticed, and with it the full cache rebuild that burns your *subscription usage limit*. Same tool, more honest name. (The GitHub repo was renamed too; old links redirect.)
 
@@ -32,6 +32,7 @@ I built this because I kept hitting the daily limit without understanding why. A
 - [Which TTL mode?](#which-ttl-mode-should-you-use)
 - [Install](#install)
 - [Quick start](#quick-start)
+- [Use it in any CLI (Claude Code, Codex, …)](#use-it-in-any-cli-claude-code-codex-)
 - [Ask your own agent: /ttl-advisor](#ask-your-own-agent-ttl-advisor)
 - [Privacy](#privacy)
 - [Tips for agentic coding](#tips-for-agentic-coding)
@@ -207,10 +208,10 @@ Automatically detects VS Code or Cursor and installs the latest version.
 
 ```bash
 # VS Code
-curl -L https://github.com/PurplePrintAI/save-ur-usage-limit-ttl-counter-for-claude-code/releases/latest/download/claude-ttl-counter-0.7.0.vsix -o /tmp/ttl.vsix && code --install-extension /tmp/ttl.vsix
+curl -L https://github.com/PurplePrintAI/save-ur-usage-limit-ttl-counter-for-claude-code/releases/latest/download/claude-ttl-counter-0.8.0.vsix -o /tmp/ttl.vsix && code --install-extension /tmp/ttl.vsix
 
 # Cursor
-curl -L https://github.com/PurplePrintAI/save-ur-usage-limit-ttl-counter-for-claude-code/releases/latest/download/claude-ttl-counter-0.7.0.vsix -o /tmp/ttl.vsix && cursor --install-extension /tmp/ttl.vsix
+curl -L https://github.com/PurplePrintAI/save-ur-usage-limit-ttl-counter-for-claude-code/releases/latest/download/claude-ttl-counter-0.8.0.vsix -o /tmp/ttl.vsix && cursor --install-extension /tmp/ttl.vsix
 ```
 
 ### Option 3: From IDE
@@ -227,6 +228,41 @@ curl -L https://github.com/PurplePrintAI/save-ur-usage-limit-ttl-counter-for-cla
 6. Optional: click → **Connect subscription usage** to see your real 5h / 7d usage after every turn (see [Real subscription usage](#real-subscription-usage-5h--7d))
 
 For a detailed guide, see [HOW-TO-USE.md](./HOW-TO-USE.md).
+
+## Use it in any CLI (Claude Code, Codex, …)
+
+The status bar is a VS Code / Cursor feature, but the same countdown works in the terminal through **`bridge/statusline.js`** — a zero-dependency Node script. It is *self-sourcing*: it reads Claude's local files directly, so it does not need the host CLI to feed it anything. It prints one line:
+
+```text
+TTL 42:15 · ctx 34% · 5h 22% (1.2h) · 7d 23% (4.6d)
+```
+
+TTL turns yellow then red as it runs down; a usage window turns red past 90%; windows whose reset already passed are dropped so you never see a stale number.
+
+**Claude Code CLI** — native statusline hook. In `~/.claude/settings.json`:
+
+```json
+{
+  "statusLine": { "type": "command", "command": "node /absolute/path/to/bridge/statusline.js" }
+}
+```
+
+Claude Code pipes session JSON (transcript path, context %, and 5h/7d `rate_limits` since v2.1.80) to the script, so you get everything with no network call.
+
+**Codex CLI and other CLIs** — Codex has no custom-command statusline (only a fixed built-in list), and most CLIs don't. Show the line at the *terminal* level instead, which works no matter which CLI is in the foreground. tmux:
+
+```tmux
+set -g status-right "#(node /absolute/path/to/bridge/statusline.js --usage)"
+set -g status-interval 15
+```
+
+Or a simple polling panel: `watch -n 5 node /absolute/path/to/bridge/statusline.js --usage`.
+
+Because these hosts don't pipe Claude's usage in, add `--usage` (or `CLAUDE_TTL_USAGE=1`) to let the script fetch your real 5h/7d from Anthropic — the same opt-in, token-only call the extension makes (see [Privacy](#privacy)), refreshed in the background with a 60-second cache so the line never blocks. Without `--usage` it still shows the TTL countdown, plus usage if the Claude Code statusline or extension has written a fresh sample.
+
+> **What it measures is Claude-specific.** The 5m/1h TTL and 5h/7d usage are Anthropic concepts. Codex (OpenAI) has no equivalent user-tunable cache TTL, so there's nothing to count there — the line reflects your Claude sessions, displayed in whatever terminal you keep open.
+
+Run `node bridge/statusline.js --help` for all options.
 
 ## Ask your own agent: /ttl-advisor
 

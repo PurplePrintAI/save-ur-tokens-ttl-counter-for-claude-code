@@ -14,6 +14,7 @@
 - [Per-project TTL](#per-project-ttl)
 - [Rolling status bar](#rolling-status-bar)
 - [Subscription usage (5h / 7d)](#subscription-usage-5h--7d)
+- [CLI statusline (Claude Code, Codex, any terminal)](#cli-statusline-claude-code-codex-any-terminal)
 - [Statusline bridge (fallback)](#statusline-bridge-fallback)
 
 ---
@@ -247,9 +248,64 @@ Off by default. This is the extension's only network call: one request per `clau
 
 ---
 
+## CLI statusline (Claude Code, Codex, any terminal)
+
+`bridge/statusline.js` renders the TTL countdown (plus usage when available) as one terminal line. It reads Claude's local files itself, so it works regardless of which CLI you run.
+
+```text
+TTL 42:15 · ctx 34% · 5h 22% (1.2h) · 7d 23% (4.6d)
+```
+
+### Claude Code CLI (native)
+
+Add to `~/.claude/settings.json`:
+
+```json
+{
+  "statusLine": { "type": "command", "command": "node /absolute/path/to/bridge/statusline.js" }
+}
+```
+
+Claude Code pipes session JSON to the script — transcript path, context %, and (since v2.1.80) 5h/7d `rate_limits` — so you get the full line with no network call. The script also refreshes the bridge file, so the VS Code extension stays in sync when you use both.
+
+### Codex CLI and other CLIs (terminal-level)
+
+Codex CLI only supports a fixed built-in status line (no custom command), and most CLIs have no statusline hook at all. Show the line at the terminal level instead — it works no matter which CLI is in front.
+
+**tmux** (`~/.tmux.conf`):
+
+```tmux
+set -g status-right "#(node /absolute/path/to/bridge/statusline.js --usage)"
+set -g status-interval 15
+```
+
+**Polling panel** in a spare split:
+
+```bash
+watch -n 5 node /absolute/path/to/bridge/statusline.js --usage
+```
+
+`--usage` lets the script fetch your real 5h/7d from Anthropic (opt-in, token only, 60s background cache), because these hosts don't pipe usage in. Drop it if you only want the TTL countdown, or if the extension / Claude Code statusline already writes a fresh sample.
+
+### Options
+
+| Flag / env | Effect |
+|---|---|
+| `--usage` or `CLAUDE_TTL_USAGE=1` | Fetch real 5h/7d from `api.anthropic.com` (background, 60s cache). Not needed in Claude Code, which pipes usage in |
+| `--no-color` or `NO_COLOR` | Plain output with no ANSI colors |
+| `--help` | Show wiring examples |
+
+### Notes
+
+- What it measures is Claude-specific (the 5m/1h cache TTL and Claude subscription usage). Codex (OpenAI) has no user-tunable cache TTL, so the line reflects your Claude sessions, shown in whichever terminal you keep open.
+- Usage windows whose reset time has already passed are hidden, so you never see a stale percentage.
+- The script never blocks and always exits cleanly, so it is safe as a frequently-refreshed statusline.
+
+---
+
 ## Statusline bridge (fallback)
 
-Before v0.7 the only source was a bridge that writes Claude Code's statusline output to a local JSON file. It still works, and the extension uses it whenever its file is fresher than the last subscription sample — useful if you prefer no network calls from the extension and use the terminal CLI.
+Before v0.7 the only source was a bridge that writes Claude Code's statusline output to a local JSON file. `statusline.js` supersedes it (same bridge-file write, plus the countdown); this section stays for the older `statusline-with-bridge.js` script. It still works, and the extension uses it whenever its file is fresher than the last subscription sample — useful if you prefer no network calls from the extension and use the terminal CLI.
 
 ### How it works
 

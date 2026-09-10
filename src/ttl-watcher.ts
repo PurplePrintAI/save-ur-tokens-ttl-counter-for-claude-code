@@ -5,6 +5,7 @@ import * as path from 'node:path';
 import {
   RateLimitSource,
   RateLimitSummary,
+  dropExpiredWindows,
   pickFreshestRateLimits,
   readRateLimitSummary,
   subscriptionUsageToSummary,
@@ -338,7 +339,7 @@ export class TtlWatcher {
         : undefined;
       const rateLimitBridgePath = await this.settingsManager.getRateLimitBridgePath();
       const statuslineSummary = await readRateLimitSummary(rateLimitBridgePath, activeSession?.sessionId);
-      const rateLimits = pickFreshestRateLimits(subscriptionSummary, statuslineSummary);
+      const rateLimits = dropExpiredWindows(pickFreshestRateLimits(subscriptionSummary, statuslineSummary));
       const rateLimitDelta = this.computeRateLimitDelta(rateLimits, completedTurnAt);
 
       const mode = transcriptSignals?.observedTier ?? configuredMode;

@@ -4,7 +4,7 @@
 
 > 프롬프트 캐시를 따뜻하게 유지해서, TTL 만료로 컨텍스트 전체가 다시 캐싱되며 5시간/7일 사용량 한도가 녹는 걸 막아요.
 
-> **최신: v0.7.0** — VS Code·Cursor 안에서 실제 5h / 7d 구독 사용량 표시, 비용 시뮬레이션 추천, `/ttl-advisor` 스킬. 버전 이력은 [CHANGELOG.md](./CHANGELOG.md)에 있어요.
+> **최신: v0.8.0** — 어떤 CLI에서도 쓰는 statusline(`bridge/statusline.js`). Claude Code에는 네이티브로 붙이고, Codex CLI나 그 외 CLI에는 tmux로 띄워요. v0.7은 VS Code·Cursor 안에서 실제 5h / 7d 구독 사용량을 넣었어요. 버전 이력은 [CHANGELOG.md](./CHANGELOG.md)에 있어요.
 
 > **"Save ur tokens!"에서 이름을 바꿨어요.** 예전 이름은 조금 틀렸어요. 이 확장은 내가 보내는 토큰을 줄여주는 게 아니에요. 캐시 TTL이 모르는 사이에 만료되는 걸 막고, 그래서 컨텍스트 전체를 다시 캐싱하며 *구독 사용량 한도*가 녹는 걸 막아요. 같은 도구, 더 솔직한 이름이에요. (GitHub 레포 이름도 같이 바꿨어요. 예전 링크는 자동으로 넘어가요.)
 
@@ -30,6 +30,7 @@
 - [어떤 모드를 쓸까](#어떤-모드를-쓸까)
 - [설치](#설치)
 - [시작하기](#시작하기)
+- [어떤 CLI에서든 쓰기 (Claude Code, Codex 등)](#어떤-cli에서든-쓰기-claude-code-codex-등)
 - [내 에이전트에게 물어보기: /ttl-advisor](#내-에이전트에게-물어보기-ttl-advisor)
 - [모드 바꿀 때 주의](#모드를-바꿀-때)
 - [에이전틱 코딩 팁](#에이전틱-코딩-팁)
@@ -157,6 +158,41 @@ VS Code 또는 Cursor를 자동 감지하고 최신 버전을 설치해요.
 6. 선택: 클릭 → **구독 사용량 연결**을 누르면 매 턴 뒤 실제 5h / 7d 사용량이 떠요 ([실제 구독 사용량](#실제-구독-사용량-5h--7d) 참고)
 
 더 자세한 가이드: [HOW-TO-USE.ko.md](./HOW-TO-USE.ko.md)
+
+## 어떤 CLI에서든 쓰기 (Claude Code, Codex 등)
+
+상태 바는 VS Code·Cursor 기능이지만, 같은 카운트다운을 터미널에서도 **`bridge/statusline.js`**로 쓸 수 있어요. 의존성 없는 Node 스크립트예요. host CLI가 뭘 넘겨주지 않아도 `~/.claude`를 스스로 읽어서 한 줄을 찍어요:
+
+```text
+TTL 42:15 · ctx 34% · 5h 22% (1.2h) · 7d 23% (4.6d)
+```
+
+TTL은 줄어들면서 노랑→빨강으로 바뀌고, 사용량 창은 90%를 넘으면 빨간색, 리셋이 이미 지난 창은 오래된 값을 안 보이게 버려요.
+
+**Claude Code CLI** — 네이티브 statusline 훅. `~/.claude/settings.json`에:
+
+```json
+{
+  "statusLine": { "type": "command", "command": "node /절대경로/bridge/statusline.js" }
+}
+```
+
+Claude Code가 세션 JSON(transcript 경로, 컨텍스트 %, v2.1.80부터 5h/7d `rate_limits`)을 stdin으로 넘겨줘서, 네트워크 호출 없이 다 나와요.
+
+**Codex CLI·그 외 CLI** — Codex는 커스텀 명령 statusline이 없어요(고정 목록만). 대부분의 CLI가 그래요. 그래서 **터미널 레벨**에서 띄워요. 어떤 CLI가 앞에 있든 보여요. tmux:
+
+```tmux
+set -g status-right "#(node /절대경로/bridge/statusline.js --usage)"
+set -g status-interval 15
+```
+
+또는 폴링 패널: `watch -n 5 node /절대경로/bridge/statusline.js --usage`.
+
+이 host들은 사용량을 stdin으로 안 주니까 `--usage`(또는 `CLAUDE_TTL_USAGE=1`)를 붙이면 실제 5h/7d를 Anthropic에서 받아와요. 확장과 같은 opt-in·토큰만 보내는 호출이고([개인정보](#개인정보) 참고), 60초 캐시로 백그라운드에서 갱신해서 줄이 멈추지 않아요. `--usage` 없이도 TTL 카운트다운은 뜨고, Claude Code statusline이나 확장이 최근 값을 써놨으면 사용량도 같이 떠요.
+
+> **재는 값은 Claude 전용이에요.** 5분/1시간 TTL과 5h/7d 사용량은 Anthropic 개념이에요. Codex(OpenAI)는 사용자가 고르는 캐시 TTL이 없어서 거기서는 셀 게 없어요. 이 줄은 내 Claude 세션을 반영하고, 그걸 아무 터미널에서나 띄우는 거예요.
+
+모든 옵션은 `node bridge/statusline.js --help`로 봐요.
 
 ## 내 에이전트에게 물어보기: /ttl-advisor
 

@@ -13,6 +13,7 @@
 - [프로젝트별 TTL 설정](#프로젝트별-ttl-설정)
 - [롤링 상태 바](#롤링-상태-바)
 - [구독 사용량 (5h / 7d)](#구독-사용량-5h--7d)
+- [CLI statusline (Claude Code, Codex, 아무 터미널)](#cli-statusline-claude-code-codex-아무-터미널)
 - [사용률 브릿지 설정 (폴백)](#사용률-브릿지-설정-폴백)
 
 ---
@@ -226,9 +227,64 @@ Claude Code IDE 확장은 5시간·주간 사용률을 로컬에 남기지 않�
 
 ---
 
+## CLI statusline (Claude Code, Codex, 아무 터미널)
+
+`bridge/statusline.js`가 TTL 카운트다운(과 가능하면 사용량)을 터미널 한 줄로 찍어요. Claude 로컬 파일을 스스로 읽어서, 어떤 CLI를 쓰든 동작해요.
+
+```text
+TTL 42:15 · ctx 34% · 5h 22% (1.2h) · 7d 23% (4.6d)
+```
+
+### Claude Code CLI (네이티브)
+
+`~/.claude/settings.json`에:
+
+```json
+{
+  "statusLine": { "type": "command", "command": "node /절대경로/bridge/statusline.js" }
+}
+```
+
+Claude Code가 세션 JSON(transcript 경로, 컨텍스트 %, v2.1.80부터 5h/7d `rate_limits`)을 stdin으로 넘겨줘서, 네트워크 호출 없이 전체 줄이 나와요. 브릿지 파일도 갱신해서 VS Code 확장과 같이 쓸 때 동기화돼요.
+
+### Codex CLI·그 외 CLI (터미널 레벨)
+
+Codex CLI는 고정 statusline만 지원하고(커스텀 명령 없음), 대부분의 CLI는 statusline 훅 자체가 없어요. 그래서 터미널 레벨에서 띄워요. 어떤 CLI가 앞에 있든 보여요.
+
+**tmux** (`~/.tmux.conf`):
+
+```tmux
+set -g status-right "#(node /절대경로/bridge/statusline.js --usage)"
+set -g status-interval 15
+```
+
+**폴링 패널** (여분의 split에서):
+
+```bash
+watch -n 5 node /절대경로/bridge/statusline.js --usage
+```
+
+이 host들은 사용량을 stdin으로 안 주니까 `--usage`를 붙이면 실제 5h/7d를 Anthropic에서 받아와요(opt-in, 토큰만, 60초 백그라운드 캐시). TTL 카운트다운만 원하거나, 확장·Claude Code statusline이 최근 값을 이미 써놨으면 빼도 돼요.
+
+### 옵션
+
+| 플래그 / 환경변수 | 효과 |
+|---|---|
+| `--usage` 또는 `CLAUDE_TTL_USAGE=1` | 실제 5h/7d를 `api.anthropic.com`에서 받아와요(백그라운드, 60초 캐시). Claude Code는 stdin으로 주니까 필요 없어요 |
+| `--no-color` 또는 `NO_COLOR` | ANSI 색 없이 평문 출력 |
+| `--help` | 연결 예시 표시 |
+
+### 참고
+
+- 재는 값은 Claude 전용이에요(5분/1시간 캐시 TTL, Claude 구독 사용량). Codex(OpenAI)는 사용자가 고르는 캐시 TTL이 없어서, 이 줄은 내 Claude 세션을 아무 터미널에서나 띄우는 거예요.
+- 리셋 시각이 이미 지난 사용량 창은 숨겨서, 오래된 퍼센트가 안 보여요.
+- 스크립트는 절대 멈추지 않고 항상 정상 종료해서, 자주 갱신되는 statusline으로 안전해요.
+
+---
+
 ## 사용률 브릿지 설정 (폴백)
 
-v0.7 전에는 Claude Code statusline 출력을 로컬 JSON 파일에 써주는 bridge가 유일한 출처였어요. 지금도 동작하고, 브릿지 파일이 마지막 구독 조회보다 최신이면 그 값을 써요. 확장에서 네트워크 호출을 아예 안 하고 싶고 터미널 CLI를 쓴다면 이 방식이 맞아요.
+v0.7 전에는 Claude Code statusline 출력을 로컬 JSON 파일에 써주는 bridge가 유일한 출처였어요. `statusline.js`가 이걸 대체해요(브릿지 파일 기록 + 카운트다운). 이 항목은 옛 `statusline-with-bridge.js` 스크립트를 위해 남겨둬요. 지금도 동작하고, 브릿지 파일이 마지막 구독 조회보다 최신이면 그 값을 써요. 확장에서 네트워크 호출을 아예 안 하고 싶고 터미널 CLI를 쓴다면 이 방식이 맞아요.
 
 ### 작동 방식
 
